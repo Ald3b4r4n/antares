@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — phase 3B: browser and app control
+
+- **Computer Use approvals.** When Muse sends `cuaCardFacts`, the approval card shows the page's host (with its plain `xn--` form and a warning when the address is not ASCII), the window title quoted and as plain text, each consequential step worded as the contract says ("Step N: action role "label" — effect"), and the data the call would send, with secrets masked and never shown. A warning says to read every step.
+- **Tool approvals** (what an MCP browser tool's request looks like) list their arguments as `name: value` lines instead of one clipped blob.
+- Fix: since the "+" menu work, approval cards had lost their padding because the queue list's `.pending` style also matched the approval card's own `pending` class. The queue styles are scoped to `#pending` again.
+- New guide `docs/BROWSER.md`: what Antares does and cannot do (it cannot configure MCP servers), the observed `settings.json` shape, an untested example, and safety advice.
+- Probes: `scripts/probe-mcp-config.ts` and `scripts/probe-mcp-config2.mjs` (throwaway config).
+- Tests: 155 unit tests (3 new); the real-window flow now renders a synthetic browser approval with hostile markup in the window title (40 checks on both editors).
+- Not verified: a real browser MCP server, a real Computer Use request; why the connector list did not show a hand-written server in the isolated trial.
+
 ## Unreleased — phase 3A (plugins and OAuth)
 
 - **Plugins panel actions.** *Install from folder…* runs Muse's own `muse plugins validate` (read-only: it installs and executes nothing), then a dialog names the plugin, its version and description, the folder, and what it brings; hooks and MCP servers are called out as code that runs on this computer. *Install from marketplace…* lists what the configured marketplaces offer (`muse plugins list --available`), shows the source and says Antares cannot look inside before installing. *Add marketplace…* (name and source) says it installs nothing by itself. All three ask first; none approves what a plugin brings (that stays `muse plugins approve`).

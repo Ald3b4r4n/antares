@@ -94,6 +94,8 @@ Nada disto foi executado contra um servidor MCP real nem contra a configuração
 
 Risco central: controle de navegador é a ação de maior impacto. Cada domínio e cada passo consequente exigem leitura do usuário; sessões de navegador com login do usuário são desaconselhadas por padrão.
 
+**Estado da 3B (feita até onde a Antares pode ir; detalhes em [BROWSER.md](BROWSER.md)):** cartões de aprovação de Computer Use (`cuaCardFacts`) renderizados como o contrato manda (página, título da janela como texto puro, cada passo, dados mascarados, host não ASCII com a forma `xn--`); aprovações do tipo `tool` listam os argumentos como `nome: valor` (URL, seletor, texto); guia com a forma observada do `settings.json` do Muse (`schema_version` e `mcpServers`) e avisos de segurança. **Não verificado:** nenhum servidor MCP de navegador real nem pedido real de Computer Use; a lista de conectores da Antares não mostrou um servidor escrito à mão em configuração isolada (o CLI o encontrou), causa não resolvida.
+
 ### 3C. Mostrar e criar imagens na interface
 
 | Caso | O que o contrato diz | Plano |

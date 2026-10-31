@@ -39,6 +39,18 @@ export interface ApprovalChoiceView {
   acceptsFeedback: boolean;
 }
 
+/**
+ * A Computer Use approval's facts, worded the way the contract says to word them (`cuaCardFacts`): the page's
+ * host, the window title (the app's own text, shown quoted and as plain text), each step that may have an effect,
+ * and the data the call would send (a secret is shown masked, never its value).
+ */
+export interface CuaView {
+  page?: { host: string; hostAscii: string; /** The host is not plain ASCII: show the `xn--` form too. */ idn: boolean };
+  windowTitle?: string;
+  steps: string[];
+  data: string[];
+}
+
 export interface ApprovalSubjectView {
   kind: string;
   /** One line a person can judge: the command, the path, the host... */
@@ -152,6 +164,8 @@ export type ChatEvent =
       protectedWrite: boolean;
       judgeEscalated: boolean;
       reviewerReason?: string;
+      /** Present only on a Computer Use approval. */
+      cua?: CuaView;
     }
   | { type: "approvalResolved"; approvalId: string; decision: string; resolvedBy: string; policyResult: string };
 
@@ -472,7 +486,7 @@ export function subjectView(subject: unknown, toolName: string, rawArgs: string)
     case "process":
       return { kind, summary: `control ${str(s.target) ?? "?"}`, detail: [via], generic: false };
     case "tool":
-      return { kind, summary: str(s.toolName) ?? toolName, detail: rawArgs ? [clip(rawArgs, 300)] : [], generic: false };
+      return { kind, summary: str(s.toolName) ?? toolName, detail: toolArgLines(rawArgs), generic: false };
     default:
       // Unknown kinds are shown generically and are never auto-approved (contract, SS5.2).
       return { kind, summary: `${toolName}: ${clip(rawArgs, 200)}`, detail: [`unrecognized approval kind "${kind}"`], generic: true };
@@ -480,6 +494,75 @@ export function subjectView(subject: unknown, toolName: string, rawArgs: string)
 }
 
 /** Maps the params shared by `approval/request` (server request) and `approval/requested` (notification). */
+const SECRET_WORDS: Record<string, string> = { github_token: "a GitHub token", secret_named_value: "a named secret value" };
+
+function describeSecret(secretKind: unknown, mask: unknown): string {
+  const kind = typeof secretKind === "string" ? (SECRET_WORDS[secretKind] ?? "a secret") : "a secret";
+  const m = isObj(mask) ? mask : undefined;
+  const prefix = str(m?.prefix);
+  const last4 = str(m?.last4);
+  const chars = num(m?.chars);
+  const shown = prefix && last4 ? `${prefix}…${last4}` : prefix && chars !== undefined ? `${prefix}… (${chars} chars)` : chars !== undefined ? `(${chars} chars)` : "";
+  return shown ? `${kind}: ${shown}` : kind;
+}
+
+/** Words one Computer Use step as the contract says: "Step N: <action> <roleWord> "<label>" — <effect>". */
+function describeStep(raw: Obj, n: number): string | undefined {
+  const action = str(raw.action);
+  const effect = str(raw.effect);
+  if (!action || !effect) return undefined;
+  const chord = str(raw.chord);
+  const label = str(raw.label);
+  const point = isObj(raw.point) && num(raw.point.x) !== undefined && num(raw.point.y) !== undefined ? `${num(raw.point.x)},${num(raw.point.y)}` : undefined;
+  const role = str(raw.roleWord);
+  const target = chord ? ` "${clip(chord, 60)}"` : label ? ` "${clip(label, 80)}"` : point ? ` at ${point}` : "";
+  return `Step ${n}: ${clip(action, 60)}${role && (chord || label) ? ` ${clip(role, 20)}` : ""}${target} — ${clip(effect, 240)}`;
+}
+
+export function mapCua(facts: unknown): CuaView | undefined {
+  if (!isObj(facts)) return undefined;
+  const steps: string[] = [];
+  for (const s of Array.isArray(facts.steps) ? facts.steps : []) {
+    const text = isObj(s) ? describeStep(s, steps.length + 1) : undefined;
+    if (text) steps.push(text);
+  }
+  const data: string[] = [];
+  for (const f of Array.isArray(facts.data) ? facts.data : []) {
+    if (!isObj(f)) continue;
+    data.push(f.kind === "secret" ? describeSecret(f.secretKind, f.mask) : "some other data the host could not describe");
+  }
+  const host = isObj(facts.page) ? str(facts.page.host) : undefined;
+  const ascii = isObj(facts.page) ? (str(facts.page.hostAscii) ?? host) : undefined;
+  return {
+    ...(host && ascii ? { page: { host: clip(host, 120), hostAscii: clip(ascii, 160), idn: host !== ascii } } : {}),
+    ...(str(facts.windowTitle) ? { windowTitle: clip(str(facts.windowTitle)!, 200) } : {}),
+    steps,
+    data,
+  };
+}
+
+/** The arguments of a `tool` approval as "name: value" lines, which is how a browser or other MCP tool's request reads best. */
+export function toolArgLines(rawArgs: string): string[] {
+  if (!rawArgs) return [];
+  try {
+    const parsed: unknown = JSON.parse(rawArgs);
+    if (isObj(parsed)) {
+      const lines: string[] = [];
+      for (const [key, value] of Object.entries(parsed)) {
+        if (lines.length >= 8) {
+          lines.push(`… and ${Object.keys(parsed).length - 8} more`);
+          break;
+        }
+        lines.push(`${clip(key, 40)}: ${clip(typeof value === "string" ? value : (JSON.stringify(value) ?? ""), 200)}`);
+      }
+      return lines;
+    }
+  } catch {
+    /* not JSON: show it as it came */
+  }
+  return [clip(rawArgs, 300)];
+}
+
 export function mapApprovalRequest(params: unknown): ChatEvent | undefined {
   if (!isObj(params)) return undefined;
   const approvalId = str(params.approvalId);
@@ -503,6 +586,7 @@ export function mapApprovalRequest(params: unknown): ChatEvent | undefined {
   if (choices.length === 0) return undefined;
   const toolName = str(params.toolName) ?? "tool";
   const rawArgs = str(params.rawArgs) ?? "";
+  const cua = mapCua(params.cuaCardFacts);
   return {
     type: "approvalRequested",
     approvalId,
@@ -514,5 +598,6 @@ export function mapApprovalRequest(params: unknown): ChatEvent | undefined {
     protectedWrite: params.protectedWrite === true,
     judgeEscalated: params.judgeEscalated === true,
     reviewerReason: str(params.reviewerReason),
+    ...(cua ? { cua } : {}),
   };
 }

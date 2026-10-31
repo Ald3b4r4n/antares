@@ -2,7 +2,7 @@
 // approval shapes come from the exported schema (no real approval request has been seen yet).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { failureHint, mapApprovalRequest, mapNotification, sandboxNote, subjectView, summarizeArgs } from "../../src/muse/events.ts";
+import { failureHint, mapApprovalRequest, mapCua, mapNotification, sandboxNote, subjectView, summarizeArgs, toolArgLines } from "../../src/muse/events.ts";
 
 const requirementId = { approvalId: "ap-1", sourceIndex: 2 };
 const base = {
@@ -131,4 +131,56 @@ test("sandbox note: only when the host says it cannot enforce a sandbox", () => 
   assert.equal(sandboxNote(undefined, "win32"), undefined, "no claim when the host did not say");
   assert.match(sandboxNote("unavailable", "win32") ?? "", /muse sandbox windows setup/);
   assert.doesNotMatch(sandboxNote("unavailable", "darwin") ?? "", /windows/);
+});
+
+test("computer use: the card is worded as the contract says, with the page, the window and masked data", () => {
+  const cua = mapCua({
+    page: { host: "bücher.example", hostAscii: "xn--bcher-kva.example" },
+    windowTitle: "Checkout <img src=x onerror=alert(1)>",
+    steps: [
+      { step: 1, action: "click", roleWord: "button", label: "Pay now", effect: "may place an order", kind: "verb:commit" },
+      { step: 2, action: "press", roleWord: "key", chord: "Ctrl+Enter", effect: "may submit the form", kind: "verb:key" },
+      { step: 3, action: "click", effect: "may do something", kind: "unlabeled", point: { x: 120, y: 340 } },
+      { step: 4, action: "type into", effect: "types text" },
+      { action: "broken" },
+    ],
+    data: [
+      { kind: "secret", secretKind: "github_token", mask: { prefix: "ghp_", last4: "3f9a" } },
+      { kind: "secret", secretKind: "secret_named_value", mask: { prefix: "password=", chars: 12 } },
+      { kind: "secret", mask: { chars: 40 } },
+      { kind: "other" },
+    ],
+  });
+  assert.deepEqual(cua?.page, { host: "bücher.example", hostAscii: "xn--bcher-kva.example", idn: true });
+  assert.equal(cua?.windowTitle, "Checkout <img src=x onerror=alert(1)>", "kept as plain text for the page to show as text");
+  assert.deepEqual(cua?.steps, [
+    'Step 1: click button "Pay now" — may place an order',
+    'Step 2: press key "Ctrl+Enter" — may submit the form',
+    "Step 3: click at 120,340 — may do something",
+    "Step 4: type into — types text",
+  ]);
+  assert.deepEqual(cua?.data, ["a GitHub token: ghp_…3f9a", "a named secret value: password=… (12 chars)", "a secret: (40 chars)", "some other data the host could not describe"]);
+});
+
+test("computer use: a plain-ASCII host is not flagged, and a request without facts has no card", () => {
+  assert.equal(mapCua({ page: { host: "example.com", hostAscii: "example.com" }, steps: [] })?.page?.idn, false);
+  assert.equal(mapCua(undefined), undefined);
+  assert.equal(mapCua("x"), undefined);
+  const base = { approvalId: "ap", itemId: "i", toolName: "browser", rawArgs: "{}", currentRequirementId: { approvalId: "ap", sourceIndex: 0 }, subject: { kind: "tool", toolName: "browser" }, availableChoices: [{ choiceId: "c", label: "Allow once", decision: "approved", scope: "once" }] };
+  const without = mapApprovalRequest(base);
+  assert.equal(without?.type === "approvalRequested" && "cua" in without, false);
+  const withFacts = mapApprovalRequest({ ...base, cuaCardFacts: { steps: [{ action: "click", effect: "may act" }] } });
+  assert.equal(withFacts?.type === "approvalRequested" ? withFacts.cua?.steps[0] : undefined, "Step 1: click — may act");
+});
+
+test("tool approvals: the arguments read as name: value lines (a browser tool's url, selector or text)", () => {
+  assert.deepEqual(toolArgLines('{"url":"https://example.com/a","newTab":true,"opts":{"x":1}}'), ["url: https://example.com/a", "newTab: true", 'opts: {"x":1}']);
+  assert.deepEqual(toolArgLines("not json at all"), ["not json at all"]);
+  assert.deepEqual(toolArgLines(""), []);
+  const many = toolArgLines(JSON.stringify(Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`k${i}`, i]))));
+  assert.equal(many.length, 9);
+  assert.equal(many[8], "… and 3 more");
+  const subject = subjectView({ kind: "tool", toolName: "browser_navigate" }, "browser_navigate", '{"url":"https://example.com"}');
+  assert.equal(subject.summary, "browser_navigate");
+  assert.deepEqual(subject.detail, ["url: https://example.com"]);
 });

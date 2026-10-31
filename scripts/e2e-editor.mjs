@@ -256,6 +256,22 @@ try {
     check("the before side was rebuilt from the patch (beta) and the after side is the file (BETA)", sides.original.some((l) => /beta/.test(l)) && !sides.original.some((l) => /BETA/.test(l)) && sides.modified.some((l) => /BETA/.test(l)), JSON.stringify(sides));
     await shot("27-diff-editor");
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
+
+    // Browser and Computer Use approvals: a synthetic request through the real page and CSP. The window title is
+    // hostile on purpose (markup in the page's own words must stay text), and the host is not plain ASCII.
+    await evalWeb(`(() => { w.postMessage({ type: 'event', event: { type: 'approvalRequested', approvalId: 'cua-1', itemId: 'i-cua', toolName: 'browser_click',
+      subject: { kind: 'tool', summary: 'browser_click', detail: ['selector: #pay', 'text: hello'], generic: false },
+      choices: [{ choiceId: 'once', label: 'Allow once', decision: 'approved', scope: 'once' }, { choiceId: 'no', label: 'Reject', decision: 'abort', scope: 'once' }],
+      requirementId: { approvalId: 'cua-1', sourceIndex: 0 }, protectedWrite: false, judgeEscalated: false,
+      cua: { page: { host: 'b\\u00fccher.example', hostAscii: 'xn--bcher-kva.example', idn: true }, windowTitle: 'Checkout <img src=x onerror=window.__pwned=1>',
+        steps: ['Step 1: click button "Pay now" \\u2014 may place an order', 'Step 2: press key "Ctrl+Enter" \\u2014 may submit the form'], data: ['a GitHub token: ghp_\\u20263f9a'] } } }, '*'); return true; })()`);
+    await waitFor("the browser approval card", () => evalWeb("!!d.querySelector('.approval .cua')"), 10000);
+    const cua = await evalWeb("({ flags: [...d.querySelectorAll('.approval .approval-flag')].map(x => x.textContent.slice(0, 90)), rows: [...d.querySelectorAll('.cua-row')].map(x => x.textContent), steps: [...d.querySelectorAll('.cua-steps li')].map(x => x.textContent), data: [...d.querySelectorAll('.cua-data li')].map(x => x.textContent), detail: [...d.querySelectorAll('.approval-detail li')].map(x => x.textContent), injected: !!d.querySelector('.cua img') || !!w.__pwned, buttons: [...d.querySelectorAll('.approval button.choice .choice-label')].map(x => x.textContent) })");
+    check("a browser approval shows the page, the window title as plain text, every step and the masked data", /Page: b\u00fccher\.example/.test(cua.rows[0]) && /Checkout <img src=x onerror/.test(cua.rows[1]) && cua.steps.length === 2 && /Pay now/.test(cua.steps[0]) && /may place an order/.test(cua.steps[0]) && cua.data[0] === "a GitHub token: ghp_\u20263f9a", JSON.stringify(cua));
+    check("a non-ASCII host is called out with its plain form, and hostile markup in the title stays text", cua.flags.some((f) => /xn--bcher-kva\.example/.test(f)) && cua.injected === false, JSON.stringify({ flags: cua.flags, injected: cua.injected }));
+    check("the tool arguments read as name: value lines and the host's own choices are offered", cua.detail.join("|") === "selector: #pay|text: hello" && cua.buttons.includes("Allow once") && cua.buttons.includes("Reject"), JSON.stringify({ detail: cua.detail, buttons: cua.buttons }));
+    await shot("32-browser-approval");
+    await evalWeb("(() => { w.postMessage({ type: 'reset' }, '*'); return true; })()");
   }
 
   if (PLUGINS) {

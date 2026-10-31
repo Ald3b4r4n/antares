@@ -272,6 +272,30 @@
     if (scope === "localPersistent") return "saves a permanent rule";
     return "once";
   }
+  // A Computer Use approval (a browser or an app being driven): the page, the window, every consequential step and
+  // the data that would be sent, all as plain text. Window titles and labels are the page's own words and can lie.
+  function cuaBlock(c) {
+    const box = el("div", "cua");
+    box.append(el("div", "approval-flag", "The agent wants to control a browser or an app. Read every step: what it clicks or types may act on your accounts."));
+    if (c.page) {
+      box.append(el("div", "cua-row", "Page: " + c.page.host));
+      if (c.page.idn) box.append(el("div", "approval-flag", "This address uses non-ASCII characters; its plain form is " + c.page.hostAscii + ". Check it is the site you expect."));
+    }
+    if (c.windowTitle) box.append(el("div", "cua-row", "Window title (the page's own words): \u201C" + c.windowTitle + "\u201D"));
+    if (c.steps.length) {
+      const list = el("ol", "cua-steps");
+      for (const s of c.steps) list.append(el("li", "", s.replace(/^Step \d+: /, "")));
+      box.append(list);
+    }
+    if (c.data.length) {
+      box.append(el("div", "cua-row", "Would send:"));
+      const list = el("ul", "cua-data");
+      for (const d of c.data) list.append(el("li", "", d));
+      box.append(list);
+    }
+    return box;
+  }
+
   function addApproval(e) {
     // The same approval id comes again for each later stage of a multi-stage approval, with a new
     // requirement: the old card is replaced, because a decision aimed at the old stage would be refused.
@@ -291,6 +315,7 @@
       for (const line of e.subject.detail) list.append(el("li", "", line));
       node.append(list);
     }
+    if (e.cua) node.append(cuaBlock(e.cua));
     if (e.subject.generic) node.append(el("div", "approval-flag", "Antares does not recognize this kind of request. Read it carefully; it is never approved automatically."));
     if (e.protectedWrite) node.append(el("div", "approval-flag", "This guards a write to a protected file. Only allow-once and reject are offered."));
     if (e.judgeEscalated) node.append(el("div", "approval-flag", "An automated reviewer passed this to you" + (e.reviewerReason ? ": " + e.reviewerReason : ".")));
