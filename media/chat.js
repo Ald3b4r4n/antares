@@ -35,6 +35,8 @@
     tokens: undefined,
     context: undefined,
     usage: undefined,
+    ledger: undefined,
+    thresholds: [80, 95],
     background: new Set(),
     turnNote: "",
     statusText: "Ready",
@@ -258,10 +260,33 @@
     if (mins < 2880) return " · resets in " + Math.round(mins / 60) + " h";
     return " · resets in " + Math.round(mins / 1440) + " d";
   };
+  const clockTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // One usage window. Numbers are "as of" the host's last read, never live. A window whose reset time has
+  // passed has an unknown current value, so it is shown as reset instead of a stale percentage.
   function pct(label, p, resetMs) {
     if (p === undefined) return "";
-    const cls = p >= 90 ? ' class="warn"' : "";
-    return "<span" + cls + ">" + label + " " + p + "%" + fmtReset(resetMs) + "</span>";
+    if (resetMs !== undefined && resetMs <= Date.now()) {
+      return '<span class="stale" title="This window reset at ' + clockTime(resetMs) + '. Use the refresh button to read the new value.">' + label + " reset</span>";
+    }
+    const t = state.thresholds;
+    const cls = p >= t[t.length - 1] ? "err" : p >= t[0] ? "warn" : "";
+    return '<span class="' + cls + '">' + label + " " + p + "%" + fmtReset(resetMs) + "</span>";
+  }
+  function usageParts() {
+    const u = state.usage;
+    if (!u) return [];
+    const parts = [pct("5 h", u.windowPercent, u.windowResetsAtMs), pct("week", u.weeklyPercent, u.weeklyResetsAtMs)];
+    if (u.observedAtMs) parts.push('<span title="Muse reported these numbers at ' + clockTime(u.observedAtMs) + '. They are not live.">as of ' + clockTime(u.observedAtMs) + "</span>");
+    if (u.plan) parts.push("<span>" + escapeHtml(u.plan) + "</span>");
+    return parts;
+  }
+  function tokenParts() {
+    const bits = [];
+    if (state.tokens && state.tokens.cumulativeTotal) bits.push("chat " + fmtTokens(state.tokens.cumulativeTotal));
+    if (state.ledger && state.ledger.todayTokens) bits.push("today " + fmtTokens(state.ledger.todayTokens));
+    if (!bits.length) return [];
+    const last = state.tokens ? " Last call: " + fmtTokens(state.tokens.inputTokens) + " in, " + fmtTokens(state.tokens.outputTokens) + " out." : "";
+    return ['<span title="Tokens the host reported for chats run through Antares. Not the account total: other clients and unreported background work are not counted.' + last + '">tokens ' + bits.join(" · ") + "</span>"];
   }
   function renderMeta() {
     const parts = [];
@@ -279,11 +304,8 @@
       const p = c.windowTokens ? Math.round((c.usedTokens / c.windowTokens) * 100) : 0;
       parts.push("<span>context " + fmtTokens(c.usedTokens) + " / " + fmtTokens(c.windowTokens) + " (" + p + "%)</span>");
     }
-    if (state.tokens) parts.push("<span>last turn " + fmtTokens(state.tokens.inputTokens) + " in · " + fmtTokens(state.tokens.outputTokens) + " out</span>");
-    if (state.usage) {
-      parts.push(pct("5 h", state.usage.windowPercent, state.usage.windowResetsAtMs));
-      parts.push(pct("week", state.usage.weeklyPercent, state.usage.weeklyResetsAtMs));
-    }
+    parts.push(...tokenParts());
+    parts.push(...usageParts());
     if (state.turnNote) parts.push("<span>" + escapeHtml(state.turnNote) + "</span>");
     meta.innerHTML = parts.filter(Boolean).join("");
   }
@@ -350,6 +372,9 @@
     state.profiles = msg.profiles || [];
     state.modelId = msg.modelId;
     state.effort = msg.effort;
+    if (msg.usage) state.usage = msg.usage;
+    if (msg.ledger) state.ledger = msg.ledger;
+    if (Array.isArray(msg.thresholds) && msg.thresholds.length) state.thresholds = msg.thresholds;
     renderModelControls();
     profileSel.replaceChildren();
     for (const p of state.profiles) {
@@ -451,7 +476,11 @@
         renderMeta();
         break;
       case "usage":
-        state.usage = { ...(state.usage || {}), ...e };
+        for (const [k, v] of Object.entries(e)) if (v !== undefined) (state.usage = state.usage || {})[k] = v;
+        renderMeta();
+        break;
+      case "ledger":
+        state.ledger = e;
         renderMeta();
         break;
       case "models":
@@ -678,6 +707,7 @@
   });
   sendBtn.addEventListener("click", send);
   stopBtn.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+  $("refreshUsage").addEventListener("click", () => vscode.postMessage({ type: "refreshUsage" }));
   $("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
 
   renderMeta();

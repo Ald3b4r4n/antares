@@ -40,6 +40,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <select id="model" title="Model for this chat. Takes effect on the next message."></select>
     <label for="effort">Effort</label>
     <select id="effort" title="Reasoning effort sent with each message"></select>
+    <button id="refreshUsage" class="link tiny" title="Read fresh subscription usage from Muse (no model call; at most one read per minute)">↻ Usage</button>
   </div>
   <div id="attachments" class="attachments" hidden></div>
   <input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>

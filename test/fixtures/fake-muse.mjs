@@ -52,6 +52,7 @@ rl.on("line", (line) => {
   }
   switch (msg.method) {
     case "initialize":
+      rec("initialize", msg.params);
       send({ id: msg.id, result: { serverInfo: { name: "muse", version: "0.0.0-fake" }, schema: { version: 1, fingerprint: "sha256:fake" }, grantedCapabilities: [], experimentalApi: false, sessionDurability: "durable", sandboxAvailability: "unavailable" } });
       break;
     case "session/start":
@@ -67,6 +68,10 @@ rl.on("line", (line) => {
     case "model/list":
       rec("list", msg.params);
       send({ id: msg.id, result: { providerId: "meta", profileId: "tbh", source: "providerCatalog", models: CATALOG.map((m) => ({ ...m, isActive: Boolean(msg.params.sessionId) && m.modelId === activeModel })) } });
+      break;
+    case "usage/refresh":
+      rec("refresh", {});
+      send({ id: msg.id, result: { subscriptionActive: true, tierName: "Test Plan", usage: { observedAtMs: Date.now(), tier: "opaque-tier-id", window: { usedPercent: 42, windowDurationMins: 300, resetsAtMs: Date.now() + 3600000 }, weekly: { usedPercent: 7, resetsAtMs: Date.now() + 86400000 } } } });
       break;
     case "usage/read":
       send({ id: msg.id, result: {} });

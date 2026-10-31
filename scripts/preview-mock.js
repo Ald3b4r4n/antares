@@ -25,7 +25,10 @@ const CATALOG = [
   { modelId: "muse-spark-1.2", label: "muse-spark-1.2", providerId: "meta", profileId: "tbh", isDefault: false, contextLimit: 1007997, variants: ["minimal", "low", "medium", "high", "xhigh"], effortNotes: { xhigh: "Use this for deepest analysis and complex fixes." }, defaultReasoningEffort: "high" },
 ];
 const catalog = () => CATALOG.map((m) => ({ ...m, isActive: m.modelId === (modelId ?? "muse-wonder-1.0") }));
-const config = () => ({ type: "config", profileId, profiles: PROFILES, modelId, effort });
+let ledgerToday = 0;
+let usageNow;
+let refreshCount = 0;
+const config = () => ({ type: "config", profileId, profiles: PROFILES, modelId, effort, usage: usageNow, ledger: { todayTokens: ledgerToday, weekTokens: ledgerToday }, thresholds: [80, 95] });
 let n = 0;
 const decisions = new Map(); // approvalId -> resolve
 
@@ -40,7 +43,8 @@ function startTurn(text, images) {
   return turnId;
 }
 function finishTurn(turnId) {
-  emit({ type: "usage", windowPercent: 25, windowResetsAtMs: Date.now() + 52 * 60000, weeklyPercent: 30, weeklyResetsAtMs: Date.now() + 3 * 86400000 });
+  usageNow = { type: "usage", windowPercent: 25, windowResetsAtMs: Date.now() + 52 * 60000, weeklyPercent: 30, weeklyResetsAtMs: Date.now() + 3 * 86400000, observedAtMs: Date.now() };
+  emit(usageNow);
   emit({ type: "status", status: "idle" });
   emit({ type: "turnCompleted", turnId, terminal: "completed", durationMs: 4200, timeToFirstTokenMs: 900 });
 }
@@ -50,7 +54,9 @@ async function stream(id, text) {
     emit({ type: "assistantDelta", itemId: id, delta: text.slice(i, i + 6) });
     await sleep(25);
   }
-  emit({ type: "tokens", modelId: "muse-wonder-1.0", inputTokens: 41910, outputTokens: 213, reasoningTokens: 40, totalTokens: 42123 });
+  ledgerToday += 42123;
+  emit({ type: "tokens", modelId: "muse-wonder-1.0", inputTokens: 41910, outputTokens: 213, reasoningTokens: 40, totalTokens: 42123, eventId: "ev" + n, cumulativeTotal: 42123 * n });
+  emit({ type: "ledger", todayTokens: ledgerToday, weekTokens: ledgerToday });
   emit({ type: "context", usedTokens: 42378, windowTokens: 1007997, pressure: "normal" });
   emit({ type: "assistantCompleted", itemId: id, text });
 }
@@ -123,6 +129,17 @@ window.acquireVsCodeApi = () => ({
       emit({ type: "modelChanged", modelId, providerId: "meta", source: "user" });
       emit({ type: "models", models: catalog() });
       post(config());
+    } else if (m.type === "refreshUsage") {
+      refreshCount++;
+      const h = 3600000;
+      // 1: normal; 2: high (warn/err colours); 3: the 5 h window has reset (expired data)
+      const states = [
+        { windowPercent: 2, windowResetsAtMs: Date.now() + 4 * h, weeklyPercent: 31, weeklyResetsAtMs: Date.now() + 70 * h },
+        { windowPercent: 83, windowResetsAtMs: Date.now() + 2 * h, weeklyPercent: 96, weeklyResetsAtMs: Date.now() + 70 * h },
+        { windowPercent: 97, windowResetsAtMs: Date.now() - 600000, weeklyPercent: 40, weeklyResetsAtMs: Date.now() + 70 * h },
+      ];
+      usageNow = { type: "usage", ...states[(refreshCount - 1) % 3], observedAtMs: Date.now(), plan: "Muse Code High Usage", subscriptionActive: true };
+      emit(usageNow);
     } else if (m.type === "setEffort") {
       effort = m.effort;
       post(config());

@@ -11,7 +11,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: phase 1 in progress.** Chat with streaming, tool-call cards, an approval UI, a per-chat permission profile, a model and reasoning-effort picker, and image input work. The approval UI was built from the protocol schema and is tested against a fake host; **no real approval request has been observed yet**. See the [roadmap](#roadmap).
+> **Status: phase 1 in progress.** Chat with streaming, tool-call cards, an approval UI, a per-chat permission profile, a model and reasoning-effort picker, image input, and subscription-usage alerts work. The approval UI was built from the protocol schema and is tested against a fake host; **no real approval request has been observed yet**. See the [roadmap](#roadmap).
 
 > **Unofficial.** Antares is an independent community project. It is not made, endorsed or supported by Meta or the Muse Code team. "Muse" and "Muse Code" belong to their owners.
 
@@ -32,7 +32,7 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | MSP client, offline self-test (echo provider), Antares panel with banner | **Done** |
-| 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only, model and reasoning-effort picker (catalog shown before the first message, choice remembered), image input (paste, drop or attach; PNG verified against the real host). **Next:** subscription-usage alerts, sessions (list, resume, fork) | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
+| 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only, model and reasoning-effort picker (catalog shown before the first message, choice remembered), image input (paste, drop or attach; PNG verified against the real host), subscription usage (5 h and weekly windows with "as of", threshold alerts, status bar, local token ledger). **Next:** sessions (list, resume, fork) | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
 | 2 | Voice input (local Whisper, transcript sent as text), skills (`/`), worktrees | Planned |
 | 3 | MCP servers, plugins, hooks, editor diffs, terminal | Planned |
 | 4 | Video input, polish, Open VSX / Marketplace packaging | Planned |
@@ -43,7 +43,7 @@ Known limits worth stating up front:
 
 - Muse accepts `text`, `image`, `skill` and `video` as turn input. There is no audio part, so voice must be transcribed client-side.
 - Images: PNG was verified end to end against the real host; JPEG, GIF and WebP follow the contract but were not tried. The host's own size limits are unpublished, so Antares applies its own (6 images, 5 MB each, 15 MB total, scaled to 2048 px on the long side). Dropping files onto a webview may require holding Shift in VS Code; that has not been checked.
-- Subscription usage is exposed as percentages of the 5 h and weekly windows plus the tier. There is no monetary figure in the protocol, so Antares will not invent one.
+- Subscription usage is exposed as percentages of the 5 h and weekly windows. There is no monetary figure in the protocol, so Antares will not invent one. The numbers are as of the host's last read, not live: Antares shows the time, reads fresh numbers when a chat opens (`usage/refresh`, no model call, at most once a minute; setting `antares.usage.refreshOnOpen`) and after each message, and never polls. Alerts (default 80% and 95%, setting `antares.usage.alertThresholds`) fire once per window and re-arm when the window resets. The token counter is a local sum of what the host reports for chats run through Antares, not the account total.
 - Part of the protocol is experimental and may change between Muse versions. Antares checks the schema fingerprint at `initialize` and warns when it differs from the versions it was written against.
 
 ## Requirements
@@ -89,10 +89,12 @@ This opens the editor with Antares loaded as a development extension in a throwa
 src/muse/host.ts      JSON-RPC client over the stdio of `muse serve`
 src/muse/session.ts   one chat session over one host (turns, interrupt, approval relay, profile)
 src/muse/events.ts    maps raw MSP notifications to the events the UI shows
+src/muse/usage.ts     alert thresholds, token ledger, one-shot usage refresh
+src/muse/images.ts    image input validation and turn input parts
 src/muse/selftest.ts  offline end-to-end check (handshake + one echo session)
 src/muse/locate.ts    finds the muse executable
 src/muse/uuidv7.ts    MSP requires UUIDv7 command ids (v4 is refused)
-src/ui/               chat panel, shared page markup and the startup banner
+src/ui/               chat panel, shared page markup, startup banner, usage tracker (status bar, alerts)
 media/chat.js|css     the chat webview (plain JS, no build step)
 scripts/spike.ts      runs the self-test from the command line
 test/                 unit tests (npm test) and the integration suite that runs inside a real editor

@@ -85,6 +85,10 @@ export type ChatEvent =
       outputTokens: number;
       reasoningTokens: number;
       totalTokens: number;
+      /** The host's id for this report (its last source record), used to count it once. */
+      eventId?: string;
+      /** Running total the host reports for the session. */
+      cumulativeTotal?: number;
     }
   | { type: "context"; usedTokens: number; windowTokens: number; pressure?: string }
   | {
@@ -93,9 +97,15 @@ export type ChatEvent =
       windowResetsAtMs?: number;
       weeklyPercent?: number;
       weeklyResetsAtMs?: number;
+      /** When the host observed these numbers (epoch ms): render "as of", never "live". */
+      observedAtMs?: number;
+      /** The plan's display name, only known from `usage/refresh`. */
+      plan?: string;
+      subscriptionActive?: boolean;
     }
   | { type: "models"; models: ModelInfo[] }
   | { type: "modelChanged"; modelId: string; providerId?: string; source: string }
+  | { type: "ledger"; todayTokens: number; weekTokens: number }
   | { type: "effortChanged"; effort: string; source: string }
   | { type: "activity"; itemId: string; kind: string; label?: string; status: string }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
@@ -228,6 +238,8 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
         outputTokens: num(usage?.outputTokens) ?? 0,
         reasoningTokens: num(usage?.reasoningTokens) ?? 0,
         totalTokens: num(params.totalTokens) ?? 0,
+        eventId: sourceEventId(params.sourceRange),
+        cumulativeTotal: isObj(params.cumulative) ? num(params.cumulative.totalTokens) : undefined,
       };
     }
     case "session/contextUsage": {
@@ -243,6 +255,11 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
   }
 }
 
+function sourceEventId(range: unknown): string | undefined {
+  if (!isObj(range) || !isObj(range.last)) return undefined;
+  return str(range.last.id);
+}
+
 /** Maps the body of `usage/changed` and of the `usage` member of a `usage/read` result. */
 export function mapUsage(body: unknown): ChatEvent | undefined {
   if (!isObj(body)) return undefined;
@@ -255,6 +272,7 @@ export function mapUsage(body: unknown): ChatEvent | undefined {
     windowResetsAtMs: num(windowObj?.resetsAtMs),
     weeklyPercent: num(weekly?.usedPercent),
     weeklyResetsAtMs: num(weekly?.resetsAtMs),
+    observedAtMs: num(body.observedAtMs),
   };
 }
 

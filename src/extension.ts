@@ -5,13 +5,16 @@ import * as vscode from "vscode";
 import { locateMuse } from "./muse/locate.ts";
 import { runSelfTest } from "./muse/selftest.ts";
 import { ChatPanel } from "./ui/chatPanel.ts";
+import { UsageTracker } from "./ui/usageTracker.ts";
 
 export interface AntaresApi {
   chat(): ChatPanel | undefined;
+  usage(): UsageTracker;
 }
 
 export function activate(context: vscode.ExtensionContext): AntaresApi {
   const output = vscode.window.createOutputChannel("Antares");
+  const tracker = new UsageTracker(context);
 
   const selfTest = async (): Promise<void> => {
     const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
@@ -36,10 +39,26 @@ export function activate(context: vscode.ExtensionContext): AntaresApi {
 
   context.subscriptions.push(
     output,
-    vscode.commands.registerCommand("antares.open", () => ChatPanel.show(context)),
+    tracker,
+    vscode.commands.registerCommand("antares.open", () => ChatPanel.show(context, tracker)),
+    vscode.commands.registerCommand("antares.refreshUsage", async () => {
+      try {
+        await tracker.refresh();
+        void vscode.window.showInformationMessage(`Antares usage
+${tracker.summary()}`);
+      } catch (error) {
+        void vscode.window.showInformationMessage(`Antares: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }),
+    vscode.commands.registerCommand("antares.showUsage", async () => {
+      const choice = await vscode.window.showInformationMessage(`Antares usage
+${tracker.summary()}`, "Refresh usage", "Open Antares");
+      if (choice === "Refresh usage") await vscode.commands.executeCommand("antares.refreshUsage");
+      if (choice === "Open Antares") await vscode.commands.executeCommand("antares.open");
+    }),
     vscode.commands.registerCommand("antares.selfTest", selfTest),
   );
-  return { chat: () => ChatPanel.get() };
+  return { chat: () => ChatPanel.get(), usage: () => tracker };
 }
 
 export async function deactivate(): Promise<void> {

@@ -5,6 +5,7 @@ import { validateImages, type ImageInput } from "../muse/images.ts";
 import { locateMuse } from "../muse/locate.ts";
 import { MuseSession, READ_ONLY } from "../muse/session.ts";
 import { chatHtml } from "./chatHtml.ts";
+import type { UsageTracker } from "./usageTracker.ts";
 
 type FromWebview =
   | { type: "ready" }
@@ -12,6 +13,7 @@ type FromWebview =
   | { type: "stop" }
   | { type: "newChat" }
   | { type: "setProfile"; profileId: string }
+  | { type: "refreshUsage" }
   | { type: "setModel"; modelId: string }
   | { type: "setEffort"; effort?: string }
   | { type: "decide"; approvalId: string; choiceId: string; requirementId: unknown; feedback?: string }
@@ -32,6 +34,7 @@ export class ChatPanel {
   private static current: ChatPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
+  private readonly tracker: UsageTracker;
   private session?: MuseSession;
   private profile: string;
   /** The user's last model/effort choice (undefined = the host's defaults). Remembered across chats. */
@@ -43,7 +46,7 @@ export class ChatPanel {
     return ChatPanel.current;
   }
 
-  static show(context: vscode.ExtensionContext): ChatPanel {
+  static show(context: vscode.ExtensionContext, tracker: UsageTracker): ChatPanel {
     if (ChatPanel.current) {
       ChatPanel.current.panel.reveal();
       return ChatPanel.current;
@@ -54,7 +57,7 @@ export class ChatPanel {
       localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "media")],
     });
     panel.iconPath = vscode.Uri.joinPath(context.extensionUri, "media", "antares.svg");
-    ChatPanel.current = new ChatPanel(panel, context);
+    ChatPanel.current = new ChatPanel(panel, context, tracker);
     return ChatPanel.current;
   }
 
@@ -62,9 +65,10 @@ export class ChatPanel {
     return ChatPanel.current?.dispose() ?? Promise.resolve();
   }
 
-  private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
+  private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext, tracker: UsageTracker) {
     this.panel = panel;
     this.context = context;
+    this.tracker = tracker;
     const configured = vscode.workspace.getConfiguration("antares").get<string>("initialProfile", READ_ONLY);
     this.profile = KNOWN_PROFILES.has(configured) ? configured : READ_ONLY;
     this.modelId = context.globalState.get<string>("antares.modelId") || undefined;
@@ -92,7 +96,28 @@ export class ChatPanel {
   }
 
   private postConfig(): void {
-    this.post({ type: "config", profileId: this.profile, profiles: PROFILES, modelId: this.modelId, effort: this.effort });
+    this.post({
+      type: "config",
+      profileId: this.profile,
+      profiles: PROFILES,
+      modelId: this.modelId,
+      effort: this.effort,
+      usage: this.tracker.latest(),
+      ledger: this.tracker.ledgerSummary(),
+      thresholds: this.tracker.thresholds(),
+    });
+  }
+
+  /** Reads fresh usage and shows it. `quiet` swallows failures (used when the chat opens). */
+  private async refreshUsage(quiet: boolean): Promise<void> {
+    try {
+      const extras = quiet ? await this.tracker.refreshOnOpen() : await this.tracker.refresh();
+      const usage = this.tracker.latest();
+      if (usage) this.post({ type: "event", event: usage });
+      for (const event of extras) this.post({ type: "event", event });
+    } catch (error) {
+      if (!quiet) this.notice("info", error instanceof Error ? error.message : String(error));
+    }
   }
 
   private remember(): void {
@@ -139,6 +164,9 @@ export class ChatPanel {
       case "setProfile":
         await this.setProfile(message.profileId);
         break;
+      case "refreshUsage":
+        await this.refreshUsage(false);
+        break;
       case "setModel":
         await this.setModel(message.modelId);
         break;
@@ -152,6 +180,7 @@ export class ChatPanel {
         this.testState.ready++;
         this.postConfig();
         void this.warm();
+        void this.refreshUsage(true);
         break;
       case "rendered":
         this.testState.rendered = { messages: message.messages, userMessages: message.userMessages, codeBlocks: message.codeBlocks, copyButtons: message.copyButtons };
@@ -250,7 +279,11 @@ export class ChatPanel {
         this.remember();
         this.postConfig();
       }
-      this.post({ type: "event", event });
+      // Usage and token events also feed the shared tracker (status bar, alerts, ledger); the page gets
+      // the merged usage, which carries the plan name and the observation time.
+      const extras = this.tracker.handle(event);
+      this.post({ type: "event", event: event.type === "usage" ? (this.tracker.latest() ?? event) : event });
+      for (const extra of extras) this.post({ type: "event", event: extra });
     });
     session.on("exit", (code: number | null) => {
       if (this.session === session) {

@@ -41,6 +41,14 @@
       {
         "command": "antares.selfTest",
         "title": "Antares: Run offline self-test"
+      },
+      {
+        "command": "antares.showUsage",
+        "title": "Antares: Show subscription usage"
+      },
+      {
+        "command": "antares.refreshUsage",
+        "title": "Antares: Refresh subscription usage"
       }
     ],
     "configuration": {
@@ -72,6 +80,34 @@
             "Per the Muse contract: no sandbox, no approval prompts. Use with care."
           ],
           "markdownDescription": "Permission profile a new Antares chat starts with. You can change it per chat from the header; changing it starts a new chat."
+        },
+        "antares.usage.alerts": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Warn when the 5-hour or weekly usage reaches one of the thresholds below. Alerts use the numbers Muse last reported, which are as of that moment, not live."
+        },
+        "antares.usage.alertThresholds": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "default": [
+            80,
+            95
+          ],
+          "markdownDescription": "Percentages that raise an alert, for each window. Each fires once per window and re-arms when the usage falls back below it."
+        },
+        "antares.usage.refreshOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Read fresh usage when an Antares chat opens, using Muse's `usage/refresh` (experimental, rate-bounded to one per minute; it makes no model call). Turn off to rely on the numbers Muse reports after each message."
+        },
+        "antares.usage.statusBar": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the 5-hour and weekly usage in the status bar once Antares has been used in this window."
         }
       }
     }
@@ -85,7 +121,7 @@
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
     "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
-    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts"
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -52,6 +52,26 @@ export async function run(): Promise<void> {
   await panel.onMessage({ type: "copy", text: "copied by antares" });
   assert.equal(await vscode.env.clipboard.readText(), "copied by antares");
 
+  // Usage: the shared tracker raises one alert per window when a threshold is crossed (not again while
+  // above it), mirrors the numbers in the status bar, and counts reported tokens once per event id.
+  const tracker = api.usage();
+  assert.match(tracker.testState.statusText, /Antares/, "the status bar item exists before any usage is known");
+  const soon = Date.now() + 2 * 3600_000;
+  const reading = { type: "usage" as const, windowPercent: 85, windowResetsAtMs: soon, weeklyPercent: 96, weeklyResetsAtMs: soon + 86400_000, observedAtMs: Date.now() };
+  const extras = tracker.handle(reading);
+  assert.deepEqual(tracker.testState.alerts.map((a) => [a.kind, a.threshold]), [["window", 80], ["weekly", 95]], "one alert per window, at the highest crossed threshold");
+  assert.equal(extras.filter((e) => e.type === "notice").length, 2, "the chat is told as well");
+  assert.match(tracker.testState.statusText, /5h 85% · wk 96%/, "the status bar mirrors the numbers");
+  tracker.handle({ ...reading, windowPercent: 88 });
+  assert.equal(tracker.testState.alerts.length, 2, "still above the threshold: no repeat");
+  tracker.handle({ ...reading, windowPercent: 20 });
+  assert.match(tracker.testState.statusText, /5h 20%/);
+  const tokens = { type: "tokens" as const, inputTokens: 900, outputTokens: 100, reasoningTokens: 0, totalTokens: 1000, eventId: "ev-1", cumulativeTotal: 1000 };
+  const before = tracker.ledgerSummary().todayTokens;
+  tracker.handle(tokens);
+  tracker.handle(tokens);
+  assert.equal(tracker.ledgerSummary().todayTokens, before + 1000, "the same event id is counted once");
+
   // Images: a valid one goes through the real panel path; an invalid one is refused before any send.
   const png = makeSolidPng(8, 8, [0, 0, 255]).toString("base64");
   const userMessagesBefore = panel.testState.events.filter((e) => e.type === "userMessage").length;
