@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const exe = process.argv[2];
+const REAL = process.env.E2E_REAL === "1";
 const label = process.argv[3] ?? "editor";
 if (!exe) {
   console.error("usage: node scripts/e2e-editor.mjs <editor-exe> [label]");
@@ -31,13 +32,13 @@ writeFileSync(
   join(userData, "User", "settings.json"),
   JSON.stringify({ "workbench.startupEditor": "none", "security.workspace.trust.enabled": false, "telemetry.telemetryLevel": "off", "update.mode": "none", "extensions.autoCheckUpdates": false, "workbench.tips.enabled": false, "window.restoreWindows": "none", "workbench.colorTheme": "Default Dark Modern", "chat.disableAIFeatures": true, "window.dialogStyle": "custom", "workbench.secondarySideBar.defaultVisibility": "hidden" }, null, 2),
 );
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify({ "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false }, null, 2));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 
 const child = spawn(
   exe,
   [workspace, `--user-data-dir=${userData}`, `--extensions-dir=${join(work, "extensions")}`, `--extensionDevelopmentPath=${root}`, `--remote-debugging-port=${port}`, "--disable-workspace-trust", "--skip-release-notes", "--skip-welcome", "--new-window"],
-  { stdio: "ignore", env: { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" } },
+  { stdio: "ignore", env: REAL ? { ...process.env } : { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" } },
 );
 child.on("error", (e) => console.error("launch error:", e.message));
 
@@ -215,6 +216,60 @@ try {
   check("model and effort controls exist", dom.modelControls);
   check("page styles loaded", dom.cssLoaded);
 
+  if (REAL) {
+    // REAL mode: the user's own Muse login and config, a real model turn, a REAL approval request.
+    // Safety policy, enforced here and not by the page: the only thing ever allowed is a one-time fetch of
+    // example.com (a public page); every other approval is rejected.
+    const decision = process.env.E2E_DECISION === "reject" ? "reject" : "allow";
+    const prompt = "Use your web fetch tool to retrieve https://example.com and tell me the page title in one short sentence.";
+    await evalWeb(`(() => { const i = d.getElementById('input'); i.value = ${JSON.stringify(prompt)}; i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`);
+    const seen = [];
+    let sawWaiting = false;
+    const deadline = Date.now() + 240000;
+    while (Date.now() < deadline) {
+      const state = await evalWeb(`(() => {
+        const c = d.querySelector('.approval.pending');
+        const idle = !d.getElementById('send').hidden && d.querySelectorAll('.msg.assistant').length > 0;
+        return { idle, status: d.getElementById('meta').textContent.slice(0, 60), card: c ? { kind: c.querySelector('.badge').textContent, subject: c.querySelector('.approval-subject').textContent, choices: [...c.querySelectorAll('button.choice')].map(b => b.querySelector('.choice-label').textContent), previews: [...c.querySelectorAll('.rule-preview')].map(x => x.textContent), flags: [...c.querySelectorAll('.approval-flag')].map(x => x.textContent), feedback: !!c.querySelector('.approval-feedback') } : null };
+      })()`);
+      if (state.card) {
+        if (/Waiting for your approval/.test(state.status)) sawWaiting = true;
+        const allowThis = decision === "allow" && state.card.kind === "network" && state.card.subject === "example.com:443 (https)";
+        const label = allowThis ? "Allow once" : "Reject";
+        await shot(`12-real-approval-card-${seen.length + 1}`);
+        seen.push({ ...state.card, clicked: label });
+        if (label === "Reject" && state.card.feedback) await evalWeb(`(() => { const f = d.querySelector('.approval.pending .approval-feedback'); f.value = 'Not now, thanks.'; f.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()`);
+        await evalWeb(`(() => { const b = [...d.querySelectorAll('.approval.pending button.choice')].find(x => x.querySelector('.choice-label').textContent === ${JSON.stringify(label)}); b.click(); return true; })()`);
+        await sleep(1200);
+        continue;
+      }
+      if (state.idle) break;
+      await sleep(400);
+    }
+    await sleep(800);
+    await shot("13-real-approval-done");
+    const end = await evalWeb(`({
+      pending: d.querySelectorAll('.approval.pending').length,
+      resolved: [...d.querySelectorAll('.approval.resolved')].map(c => c.className.replace('approval ', '') + ' | ' + c.querySelector('.approval-outcome')?.textContent),
+      tools: [...d.querySelectorAll('.tool')].map(t => t.className.replace('tool ', '') + ' | ' + t.querySelector('.tool-name')?.textContent),
+      assistant: [...d.querySelectorAll('.msg.assistant .body')].map(b => b.textContent.slice(0, 100)),
+      idle: !d.getElementById('send').hidden
+    })`);
+    console.log("REAL:", JSON.stringify({ seen, end }));
+    const first = seen[0];
+    check("a real approval request appears as a card in the real webview", !!first && first.kind === "network" && first.subject === "example.com:443 (https)", JSON.stringify(first && { kind: first.kind, subject: first.subject }));
+    check("the card offers the host's own choices (Allow once / session / always / Reject)", !!first && ["Allow once", "Allow for this session", "Always allow this network destination", "Reject"].every((l) => first.choices.includes(l)), JSON.stringify(first?.choices));
+    check("session and persistent choices show what they would allow", !!first && first.previews.length === 2 && first.previews.every((p) => p === "example.com:443 (https)"), JSON.stringify(first?.previews));
+    check("the footer says it is waiting for the approval", sawWaiting);
+    check("every decision was made by an explicit click; no approval is left pending", end.pending === 0 && end.idle, JSON.stringify({ pending: end.pending, idle: end.idle }));
+    if (decision === "allow") {
+      check("allowed once: the card resolves as Allowed and the fetch completes", end.resolved.some((r) => /allowed/.test(r) && /approved/.test(r)) && end.tools.some((t) => /^done \| web_fetch/.test(t)), JSON.stringify({ resolved: end.resolved, tools: end.tools }));
+      check("the model answered from the fetched page", end.assistant.some((a) => /Example Domain/i.test(a)), JSON.stringify(end.assistant));
+    } else {
+      check("rejected: the card resolves as Denied and the fetch fails", end.resolved.length > 0 && end.resolved.every((r) => /denied/.test(r)) && !end.tools.some((t) => /^done \| web_fetch/.test(t)), JSON.stringify({ resolved: end.resolved, tools: end.tools }));
+    }
+    check("approvals other than example.com were rejected, never allowed", seen.filter((s) => s.clicked === "Allow once").every((s) => s.subject === "example.com:443 (https)"), JSON.stringify(seen.map((s) => [s.kind, s.subject.slice(0, 50), s.clicked])));
+  } else {
   // Send a message through the real UI path and watch the reply stream in.
   await evalWeb(`(() => { const i = d.getElementById('input'); i.value = 'hello from the real editor'; i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`);
   await waitFor("the reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length > 0 && !d.getElementById('send').hidden"), 30000);
@@ -300,8 +355,10 @@ try {
   await shot("11-narrow");
   await browser.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false }, pageSession);
 
+  }
+
   // Status bar item exists in the real workbench.
-  const status = await evalPage("[...document.querySelectorAll('.statusbar-item')].map(e => e.textContent.trim()).filter(t => /Antares/.test(t))");
+  const status = await evalPage("[...document.querySelectorAll('.statusbar-item')].map(e => e.textContent.trim()).filter(t => /Antares|5h\\s*[\\d–]/.test(t))");
   check("status bar shows the Antares item", status.length > 0, JSON.stringify(status));
   await shot("06-final");
 } catch (error) {

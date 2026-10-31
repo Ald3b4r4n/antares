@@ -2,8 +2,8 @@
  * Maps raw MSP notifications to the small set of events the chat UI understands.
  * Pure and dependency-free so it can be tested without a host. Shapes were observed with
  * `scripts/probe-*.ts` (see docs/PROTOCOL-NOTES.md); unknown shapes map to `undefined`.
- * The approval shapes come from the exported schema only: no real approval request has been
- * observed yet.
+ * Approval shapes were observed from the real host for network and shell requests (a sanitized
+ * copy is test/fixtures/real-approvals.json); other subject kinds follow the exported schema.
  */
 
 export interface ModelInfo {
@@ -54,7 +54,7 @@ export const PROFILES: { id: string; label: string; note: string }[] = [
   {
     id: ":ask-me",
     label: "Ask me",
-    note: "Human review profile. Observed once: a file write inside the workspace ran without a prompt, and the shell failed closed because the sandbox was not set up.",
+    note: "Human review profile. Observed: network access and shell commands asked for approval; file writes inside the workspace ran without a prompt; writes outside it were refused by the tool.",
   },
   { id: ":auto-review", label: "Auto-review", note: "An automated reviewer decides first and escalates to you." },
   { id: ":unrestricted", label: "Unrestricted", note: "Per the contract this starts without sandbox or approval prompts. Use with care." },
@@ -369,7 +369,8 @@ export function subjectView(subject: unknown, toolName: string, rawArgs: string)
         });
       }
       const root = str(s.workspaceRoot);
-      if (root) detail.push(`in ${root}`);
+      // The host sends Windows paths in the extended-length form (\\?\C:\...); show the plain path.
+      if (root) detail.push(`in ${root.startsWith("\\\\?\\") ? root.slice(4) : root}`);
       return { kind, summary: str(s.command) ?? clip(rawArgs, 200), detail, generic: false };
     }
     case "fileAccess":

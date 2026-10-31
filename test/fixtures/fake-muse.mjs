@@ -119,10 +119,20 @@ rl.on("line", (line) => {
         break;
       }
       send({ method: "turn/started", params: { sessionId: "s1", turnId: "t1", commandId: msg.params.commandId, viewCursor: "v4:s1:1", sourceRange: {} } });
+      // The real host announces an approval twice: as the request it wants a receipt for and as a
+      // notification. Both orders were possible, so FAKE_MUSE_ORDER picks one.
+      if (mode !== "bad-approval" && process.env.FAKE_MUSE_ORDER === "notification-first") send({ method: "approval/requested", params: goodApproval });
       send({ id: SERVER_REQUEST_ID, method: "approval/request", params: mode === "bad-approval" ? { approvalId: "ap-bad" } : goodApproval });
+      if (mode !== "bad-approval" && process.env.FAKE_MUSE_ORDER !== "notification-first") send({ method: "approval/requested", params: goodApproval });
       break;
     case "approval/decide":
       rec("decide", msg.params);
+      if (mode === "two-stage" && msg.params.requirementId?.sourceIndex === 0) {
+        // Stage 0 is satisfied but a second stage remains: the same approval id comes again with a new requirement.
+        send({ id: msg.id, result: { approvalId: msg.params.approvalId, commandId: msg.params.commandId, status: "accepted", terminal: false } });
+        send({ id: SERVER_REQUEST_ID, method: "approval/request", params: { ...goodApproval, currentRequirementId: { approvalId: "ap-1", sourceIndex: 1 }, subject: { ...goodApproval.subject, command: "second stage" } } });
+        break;
+      }
       send({ id: msg.id, result: { approvalId: msg.params.approvalId, commandId: msg.params.commandId, status: "accepted", terminal: true } });
       send({ method: "approval/resolved", params: { approvalId: msg.params.approvalId, decision: "denied", policyResult: "deny", resolvedBy: "user", itemId: "tool-1", sessionId: "s1", turnId: "t1", stageEvidence: [], sourceRange: {}, viewCursor: "v4:s1:4" } });
       send({ method: "turn/completed", params: { sessionId: "s1", turnId: "t1", terminal: "completed", durationMs: 5, viewCursor: "v4:s1:5", sourceRange: {} } });

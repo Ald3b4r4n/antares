@@ -23,7 +23,12 @@ mkdirSync(workspace, { recursive: true });
 const outDir = new URL("../spike-output/", import.meta.url);
 mkdirSync(outDir, { recursive: true });
 
-const host = new MuseHost({ binary, args: ["serve"], cwd: workspace, env: { ...process.env } });
+// A folder next to (not inside) the workspace: writing there is outside the workspace roots.
+const outside = join(work, "outside");
+mkdirSync(outside, { recursive: true });
+const profile = process.env.PROBE_PROFILE ?? ":ask-me";
+const extraArgs = (process.env.PROBE_ARGS ?? "").split(" ").filter(Boolean);
+const host = new MuseHost({ binary, args: ["serve", ...extraArgs], cwd: workspace, env: { ...process.env } });
 const log: { at: number; kind: string; method?: string; payload?: unknown }[] = [];
 const t0 = Date.now();
 const rec = (kind: string, method?: string, payload?: unknown) => log.push({ at: Date.now() - t0, kind, method, payload });
@@ -82,7 +87,7 @@ try {
   const started = await host.request<{ session?: { sessionId?: string; permissionState?: unknown } }>("session/start", {
     commandId: uuidv7(),
     workspaceRoot: workspace,
-    permissionProfile: ":ask-me",
+    permissionProfile: profile,
   });
   rec("result", "session/start", started);
   sessionId = started.session?.sessionId ?? "";
@@ -92,7 +97,7 @@ try {
   const ack = await host.request("turn/start", {
     commandId: uuidv7(),
     sessionId,
-    input: [{ type: "text", text: process.env.PROBE_PROMPT ?? "Use your shell tool to run exactly this command: echo antares" }],
+    input: [{ type: "text", text: (process.env.PROBE_PROMPT ?? "Use your shell tool to run exactly this command: echo antares").split("{OUTSIDE}").join(join(outside, "note.txt")) }],
   }, 30_000);
   rec("result", "turn/start", ack);
   await done;

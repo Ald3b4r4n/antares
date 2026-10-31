@@ -191,7 +191,14 @@
     return "once";
   }
   function addApproval(e) {
-    if (state.approvals.has(e.approvalId)) return;
+    // The same approval id comes again for each later stage of a multi-stage approval, with a new
+    // requirement: the old card is replaced, because a decision aimed at the old stage would be refused.
+    const previous = state.approvals.get(e.approvalId);
+    if (previous) {
+      if (JSON.stringify(previous.event.requirementId) === JSON.stringify(e.requirementId)) return;
+      previous.el.remove();
+      state.approvals.delete(e.approvalId);
+    }
     const node = el("div", "approval pending");
     const head = el("div", "approval-head");
     head.append(el("span", "approval-title", "Approval needed"), el("span", "badge", e.subject.kind));

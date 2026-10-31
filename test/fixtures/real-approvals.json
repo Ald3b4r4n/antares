@@ -1,0 +1,225 @@
+{
+  "request": {
+    "network": {
+      "sessionId": "00000000-0000-7000-8000-000000000001",
+      "approvalId": "00000000-0000-7000-8000-000000000002",
+      "turnId": "00000000-0000-7000-8000-000000000003",
+      "taskId": "00000000-0000-7000-8000-000000000004",
+      "itemId": "00000000-0000-7000-8000-000000000004",
+      "toolCallId": "call_00000000000000000000000000000000",
+      "toolName": "network",
+      "rawArgs": "{\"url\":\"https://example.com\"}",
+      "viewCursor": "v4:00000000-0000-7000-8000-000000000001:12",
+      "sourceRange": {
+        "stream": {
+          "kind": "session",
+          "id": "00000000-0000-7000-8000-000000000001"
+        },
+        "first": {
+          "id": "00000000-0000-7000-8000-000000000005",
+          "sequence": 80
+        },
+        "last": {
+          "id": "00000000-0000-7000-8000-000000000005",
+          "sequence": 80
+        }
+      },
+      "subject": {
+        "kind": "network",
+        "toolName": "network",
+        "host": "example.com",
+        "port": 443,
+        "protocol": "https",
+        "origin": {
+          "kind": "url",
+          "url": "https://example.com/"
+        }
+      },
+      "currentRequirementId": {
+        "approvalId": "00000000-0000-7000-8000-000000000002",
+        "sourceIndex": 0
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "allow_session",
+          "label": "Allow for this session",
+          "decision": "approvedForSession",
+          "scope": "session",
+          "rulePreview": "example.com:443 (https)"
+        },
+        {
+          "choiceId": "allow_local_network",
+          "label": "Always allow this network destination",
+          "decision": "approvedPolicyAmendment",
+          "scope": "localPersistent",
+          "rulePreview": "example.com:443 (https)"
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ],
+      "protectedWrite": false,
+      "judgeEscalated": false
+    },
+    "shell": {
+      "sessionId": "00000000-0000-7000-8000-000000000001",
+      "approvalId": "00000000-0000-7000-8000-000000000006",
+      "turnId": "00000000-0000-7000-8000-000000000003",
+      "taskId": "00000000-0000-7000-8000-000000000006",
+      "itemId": "00000000-0000-7000-8000-000000000006",
+      "toolCallId": "call_00000000000000000000000000000000",
+      "toolName": "powershell",
+      "rawArgs": "{\"command\":\"(Invoke-WebRequest -Uri 'https://example.com' -UseBasicParsing).Content | Select-Object -First 1\",\"description\":\"Fetch example.com via PowerShell\"}",
+      "viewCursor": "v4:00000000-0000-7000-8000-000000000001:61",
+      "sourceRange": {
+        "stream": {
+          "kind": "session",
+          "id": "00000000-0000-7000-8000-000000000001"
+        },
+        "first": {
+          "id": "00000000-0000-7000-8000-000000000007",
+          "sequence": 228
+        },
+        "last": {
+          "id": "00000000-0000-7000-8000-000000000007",
+          "sequence": 228
+        }
+      },
+      "subject": {
+        "kind": "shell",
+        "command": "(Invoke-WebRequest -Uri 'https://example.com' -UseBasicParsing).Content | Select-Object -First 1",
+        "workspaceRoot": "\\\\?\\C:\\Users\\USER\\AppData\\Local\\Temp\\antares-approval-XXXXXX\\workspace",
+        "stages": []
+      },
+      "currentRequirementId": {
+        "approvalId": "00000000-0000-7000-8000-000000000006",
+        "sourceIndex": 0
+      },
+      "availableChoices": [
+        {
+          "choiceId": "allow_once",
+          "label": "Allow once",
+          "decision": "approved",
+          "scope": "once"
+        },
+        {
+          "choiceId": "abort",
+          "label": "Reject",
+          "decision": "abort",
+          "scope": "once",
+          "acceptsFeedback": true
+        }
+      ],
+      "protectedWrite": false,
+      "judgeEscalated": false
+    }
+  },
+  "notificationOfNetwork": {
+    "sessionId": "00000000-0000-7000-8000-000000000001",
+    "approvalId": "00000000-0000-7000-8000-000000000002",
+    "turnId": "00000000-0000-7000-8000-000000000003",
+    "taskId": "00000000-0000-7000-8000-000000000004",
+    "itemId": "00000000-0000-7000-8000-000000000004",
+    "toolCallId": "call_00000000000000000000000000000000",
+    "toolName": "network",
+    "rawArgs": "{\"url\":\"https://example.com\"}",
+    "viewCursor": "v4:00000000-0000-7000-8000-000000000001:12",
+    "sourceRange": {
+      "stream": {
+        "kind": "session",
+        "id": "00000000-0000-7000-8000-000000000001"
+      },
+      "first": {
+        "id": "00000000-0000-7000-8000-000000000005",
+        "sequence": 80
+      },
+      "last": {
+        "id": "00000000-0000-7000-8000-000000000005",
+        "sequence": 80
+      }
+    },
+    "subject": {
+      "kind": "network",
+      "toolName": "network",
+      "host": "example.com",
+      "port": 443,
+      "protocol": "https",
+      "origin": {
+        "kind": "url",
+        "url": "https://example.com/"
+      }
+    },
+    "currentRequirementId": {
+      "approvalId": "00000000-0000-7000-8000-000000000002",
+      "sourceIndex": 0
+    },
+    "availableChoices": [
+      {
+        "choiceId": "allow_once",
+        "label": "Allow once",
+        "decision": "approved",
+        "scope": "once"
+      },
+      {
+        "choiceId": "allow_session",
+        "label": "Allow for this session",
+        "decision": "approvedForSession",
+        "scope": "session",
+        "rulePreview": "example.com:443 (https)"
+      },
+      {
+        "choiceId": "allow_local_network",
+        "label": "Always allow this network destination",
+        "decision": "approvedPolicyAmendment",
+        "scope": "localPersistent",
+        "rulePreview": "example.com:443 (https)"
+      },
+      {
+        "choiceId": "abort",
+        "label": "Reject",
+        "decision": "abort",
+        "scope": "once",
+        "acceptsFeedback": true
+      }
+    ],
+    "protectedWrite": false,
+    "judgeEscalated": false
+  },
+  "resolvedAbort": {
+    "sessionId": "00000000-0000-7000-8000-000000000001",
+    "viewCursor": "v4:00000000-0000-7000-8000-000000000001:13",
+    "sourceRange": {
+      "stream": {
+        "kind": "session",
+        "id": "00000000-0000-7000-8000-000000000001"
+      },
+      "first": {
+        "id": "00000000-0000-7000-8000-000000000008",
+        "sequence": 82
+      },
+      "last": {
+        "id": "00000000-0000-7000-8000-000000000008",
+        "sequence": 82
+      }
+    },
+    "approvalId": "00000000-0000-7000-8000-000000000002",
+    "itemId": "00000000-0000-7000-8000-000000000004",
+    "turnId": "00000000-0000-7000-8000-000000000003",
+    "decision": "abort",
+    "policyResult": "deny",
+    "resolvedBy": "user",
+    "decidedByCommandId": "00000000-0000-7000-8000-000000000009",
+    "decidedAt": "2026-01-01T00:00:00Z",
+    "stageEvidence": []
+  }
+}

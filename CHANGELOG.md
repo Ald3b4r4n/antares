@@ -15,6 +15,8 @@
 - Fix: if the Muse process cannot be started, `stop()` no longer waits forever for an exit that cannot come (it could have frozen New chat or closing the panel), and a write to a dead host no longer raises an unhandled error.
 - Real-window end-to-end check (`node scripts/e2e-editor.mjs`): drives the actual VS Code and Antigravity IDE windows over CDP with screenshots; 18 checks pass on both.
 - Fix: the block-letter banner replaces slash-and-underscore lettering that was unreadable in the real editor; narrow panels no longer overflow (header wraps, banner scales, selectors and composer stack) down to about 220 px.
+- Real approvals: checked against the real host, through the session code and in the real editor window (a real model turn asks for network access; the card shows the host's own choices; allowed once and rejected both work). The host's `abort` decision is what "Reject" sends.
+- Fix: the host announces every approval twice (the request and an `approval/requested` notification), which showed it twice to anything consuming the session and made the second decision fail with "already resolved"; each (approval, stage) is now shown once. A later stage of a multi-stage approval (same approval id, new requirement) now replaces the card, because a decision aimed at the old stage would be refused. The extended-length `\\?\` prefix is hidden in shell approvals.
 - Unit tests for the event mapper and an approval-relay test against a fake MSP host (`npm test`).
 - Event mapper for the observed MSP notifications; offline `smoke` test and a browser `preview` with a fake host.
 - Integration suite (`npm run test:editor`) that runs inside a real editor; passing on VS Code 1.143.1 and Antigravity IDE 1.107.0.

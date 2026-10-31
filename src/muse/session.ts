@@ -57,7 +57,13 @@ export class MuseSession extends EventEmitter {
   private catalog: ModelInfo[] = [];
   private modelId?: string;
   private effort?: string;
-  private readonly pendingApprovals = new Set<string>();
+  /**
+   * Approval stages already shown, as "approvalId#stage". The host announces each approval twice (as the
+   * `approval/request` it expects a receipt for, and as an `approval/requested` notification), and
+   * re-sends the request with the same approval id for each later stage of a multi-stage approval.
+   * Each (approval, stage) is shown once; a new stage is shown again.
+   */
+  private readonly announcedApprovals = new Set<string>();
 
   info: { version?: string; fingerprint?: string; sandbox?: string; durability?: string } = {};
 
@@ -125,7 +131,7 @@ export class MuseSession extends EventEmitter {
       this.sessionId = undefined;
       this.starting = undefined;
       this.hostReady = undefined;
-      this.pendingApprovals.clear();
+      this.announcedApprovals.clear();
       this.emit("exit", code);
     });
     host.start();
@@ -248,16 +254,29 @@ export class MuseSession extends EventEmitter {
     if (event.type === "turnStarted") this.currentTurnId = event.turnId;
     if (event.type === "turnCompleted") {
       this.currentTurnId = undefined;
-      this.pendingApprovals.clear();
+      this.announcedApprovals.clear();
     }
-    if (event.type === "approvalRequested") this.pendingApprovals.add(event.approvalId);
-    if (event.type === "approvalResolved") this.pendingApprovals.delete(event.approvalId);
+    if (event.type === "approvalRequested" && !this.announce(event)) return;
+    if (event.type === "approvalResolved") this.forgetApproval(event.approvalId);
     if (event.type === "modelChanged") {
       this.modelId = event.modelId;
       this.catalog = this.catalog.map((m) => ({ ...m, isActive: m.modelId === event.modelId }));
       this.emitEvent({ type: "models", models: this.catalog });
     }
     this.emitEvent(event);
+  }
+
+  /** True the first time a given (approval, stage) is seen. */
+  private announce(event: Extract<ChatEvent, { type: "approvalRequested" }>): boolean {
+    const stage = (event.requirementId as { sourceIndex?: unknown } | null)?.sourceIndex;
+    const key = `${event.approvalId}#${typeof stage === "number" ? stage : 0}`;
+    if (this.announcedApprovals.has(key)) return false;
+    this.announcedApprovals.add(key);
+    return true;
+  }
+
+  private forgetApproval(approvalId: string): void {
+    for (const key of this.announcedApprovals) if (key.startsWith(`${approvalId}#`)) this.announcedApprovals.delete(key);
   }
 
   private onServerRequest(id: number | string, method: string, params: unknown): void {
@@ -269,9 +288,8 @@ export class MuseSession extends EventEmitter {
         void this.interrupt();
         return;
       }
-      this.host?.respond(id, {});
-      this.pendingApprovals.add(event.approvalId);
-      this.emitEvent(event);
+      this.host?.respond(id, {}); // always answer the request, even when the notification already showed it
+      if (this.announce(event)) this.emitEvent(event);
       return;
     }
     this.notice("warning", `The agent asked for "${method}", which this build of Antares cannot answer yet. Stopping the turn.`);

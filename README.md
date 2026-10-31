@@ -6,6 +6,10 @@
   <img src="docs/images/antares-vscode.png" alt="Antares open in VS Code, with the offline echo provider" width="720"><br>
   <sub>Antares in VS Code (offline echo provider, throwaway profile).</sub>
 </p>
+<p align="center">
+  <img src="docs/images/antares-approval.png" alt="A real approval request in Antares: network access to example.com, with the host's own choices" width="720"><br>
+  <sub>A real approval request from Muse (network access), with the host's own choices.</sub>
+</p>
 
 ```text
    _   _  _ _____   _   ___ ___ ___
@@ -16,7 +20,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: phase 1 in progress.** Chat with streaming, tool-call cards, an approval UI, a per-chat permission profile, a model and reasoning-effort picker, image input, subscription-usage alerts, and a session history work. The approval UI was built from the protocol schema and is tested against a fake host; **no real approval request has been observed yet**. See the [roadmap](#roadmap).
+> **Status: phase 1 in progress.** Chat with streaming, tool-call cards, an approval UI, a per-chat permission profile, a model and reasoning-effort picker, image input, subscription-usage alerts, and a session history work. Approvals were checked against the real host (network and shell requests, allowed once and rejected, in the real editor window). See the [roadmap](#roadmap).
 
 > **Unofficial.** Antares is an independent community project. It is not made, endorsed or supported by Meta or the Muse Code team. "Muse" and "Muse Code" belong to their owners.
 
@@ -37,7 +41,7 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | MSP client, offline self-test (echo provider), Antares panel with banner | **Done** |
-| 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only, model and reasoning-effort picker (catalog shown before the first message, choice remembered), image input (paste, drop or attach; PNG verified against the real host), subscription usage (5 h and weekly windows with "as of", threshold alerts, status bar, local token ledger), session history (continue or fork a stored session of the open folder, with the conversation redrawn). **Phase 1 feature list complete;** what is left before calling it done is looking at it inside the editors and observing a real approval request. | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
+| 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only, model and reasoning-effort picker (catalog shown before the first message, choice remembered), image input (paste, drop or attach; PNG verified against the real host), subscription usage (5 h and weekly windows with "as of", threshold alerts, status bar, local token ledger), session history (continue or fork a stored session of the open folder, with the conversation redrawn). **Phase 1 feature list complete and checked in the real editors, including real approvals.** Not yet seen: file-access and Unix-socket approvals, multi-stage approvals from the real host (handled and tested against a fake one), and `:auto-review`. | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
 | 2 | Voice input (local Whisper, transcript sent as text), skills (`/`), worktrees | Planned |
 | 3 | MCP servers, plugins, hooks, editor diffs, terminal | Planned |
 | 4 | Video input, polish, Open VSX / Marketplace packaging | Planned |
@@ -97,7 +101,9 @@ node scripts/e2e-editor.mjs "<path to the editor executable>" vscode
 
 This launches the editor for real, with Antares loaded as a development extension in a throwaway profile (offline `echo` provider, isolated Muse config, no login, no model call), connects to it over the Chrome DevTools Protocol, opens the panel from the command palette, drives the **real webview** and saves screenshots of the real window to `spike-output/e2e/`. It checks 18 things, among them: the banner and logo load through the webview URI; a message round-trips; the copy button reaches the clipboard through the extension host; real key events (Enter sends, Shift+Enter does not); a pasted image shows its thumbnail under the real Content-Security-Policy and is sent; changing the profile asks for confirmation in the editor's own dialog and restarts the chat; the history panel answers; the status bar item exists; and the panel does not overflow when narrow (down to about 220 px). It found two real problems that the browser preview and the headless tests had not: an unreadable banner and a layout that overflowed in narrow panels. Passing on VS Code 1.143.1 and Antigravity IDE 1.107.0. On the first run, Antigravity IDE shows a welcome screen; the script only presses its plain "Get Started" button and never signs in.
 
-Not covered: a real model turn or a real approval request inside the editor, and dropping files from the operating system onto the panel.
+With `E2E_REAL=1` it instead uses your own Muse login and runs a **real model turn that triggers a real approval** in the real window (`E2E_DECISION=allow` allows one fetch of `example.com` and nothing else; `E2E_DECISION=reject` rejects everything, with a note). It costs a real turn each time, and it starts your configured hooks. Both decisions passed every approval check on VS Code 1.143.1 (the one other failure on the first run was a wrong expectation about the status-bar text, since fixed).
+
+Not covered: dropping files from the operating system onto the panel, and file-access, Unix-socket and multi-stage approvals from the real host.
 
 ## Project layout
 
