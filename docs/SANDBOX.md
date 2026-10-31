@@ -41,6 +41,22 @@ Things to try, in order (none confirmed to fix it):
 4. Report it with the output of `muse sandbox windows check` and the footer text, to the Muse team (it is their host)
    and as an issue on the Antares repository.
 
+## A reproducible difference: `muse exec` works, `muse serve` does not
+
+Measured on the development machine (Windows, Muse Code 1.4.14), same profile and same prompt ("run `echo antares-sandbox-test` with your shell tool"):
+
+| How Muse was started | Profile | Result |
+|---|---|---|
+| `muse exec --permission-profile :ask-me "..."` (headless, in-process) | `:ask-me` (sandboxed) | The command **ran**; the output `antares-sandbox-test` came back |
+| `muse serve` (what Antares and any MSP client use), session started with `:ask-me` | `:ask-me` | The tool call **failed**: `environment failure: sandbox enforcement unavailable: windows_elevated setup_required: windows elevated sandbox setup has not run` |
+| `muse` terminal app, default profile | YOLO (no sandbox, no approval) | Works, but proves nothing about the sandbox |
+
+Also for `muse serve`: `initialize` reports `sandboxAvailability: "unavailable"` with no reason, for the default options, `--sandbox-network proxy-only`, `restricted` and `enabled`, `--trust-workspace`, `--no-session-log` and `--provider echo`, for `muse.exe` and for the versioned binary, and from an editor running as Administrator. `muse sandbox windows check` says `status=ready` throughout.
+
+So the sandbox itself works on that machine; the stdio host does not manage to use it. This looks like a defect or an undocumented condition in `muse serve` on Windows, not something Antares or a missing setup causes. **Please report it to the Muse team** with the table above. If you find what makes `serve` see the sandbox (an environment variable, a setting), please open an issue on the Antares repository so this page can say it.
+
+Until it is fixed: Antares shows the problem in the footer and on the failed call, Plan and Accept edits still read and edit, and commands can be run in the editor's own terminal.
+
 ## Working without it
 
 - **Plan** and **Accept edits** still read and edit files, which covers reviewing and writing code.
