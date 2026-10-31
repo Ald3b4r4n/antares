@@ -52,6 +52,10 @@ writeFileSync(join(workspace, "plan.txt"), "alpha\nBETA\ngamma\n");
 writeFileSync(patchFile, JSON.stringify({ files: [{ path: join(workspace, "plan.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] }));
 writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
+// Images for the workspace-image check: one inside the workspace, one outside it (a real 1x1 PNG each).
+const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+writeFileSync(join(workspace, "shot.png"), tinyPng);
+writeFileSync(join(work, "outside.png"), tinyPng);
 const fakeHome = join(work, "home");
 mkdirSync(join(fakeHome, ".claude", "skills", "demo-import"), { recursive: true });
 writeFileSync(join(fakeHome, ".claude", "skills", "demo-import", "SKILL.md"), "---\nname: demo-import\ndescription: A fake skill used only by the Antares end-to-end check.\n---\nSay hello.\n");
@@ -271,6 +275,18 @@ try {
     check("a non-ASCII host is called out with its plain form, and hostile markup in the title stays text", cua.flags.some((f) => /xn--bcher-kva\.example/.test(f)) && cua.injected === false, JSON.stringify({ flags: cua.flags, injected: cua.injected }));
     check("the tool arguments read as name: value lines and the host's own choices are offered", cua.detail.join("|") === "selector: #pay|text: hello" && cua.buttons.includes("Allow once") && cua.buttons.includes("Reject"), JSON.stringify({ detail: cua.detail, buttons: cua.buttons }));
     await shot("32-browser-approval");
+
+    // Images from the workspace: the page asks, the extension reads the file with its checks. One valid file, one
+    // outside the workspace and one web address in an assistant message, plus a read_file of an image.
+    await evalWeb(`(() => {
+      w.postMessage({ type: 'event', event: { type: 'assistantCompleted', itemId: 'a-img', text: 'Here it is: ![the shot](shot.png) and ![secret](../outside.png) and ![web](https://example.com/x.png) done.' } }, '*');
+      w.postMessage({ type: 'event', event: { type: 'toolCall', itemId: 'tc-img', tool: 'read_file', summary: 'shot.png', status: 'completed', held: false, imagePath: 'shot.png' } }, '*');
+      return true; })()`);
+    await waitFor("the images to resolve", () => evalWeb("d.querySelectorAll('.inline-img').length >= 2 && d.querySelectorAll('.img-denied').length >= 2"), 15000);
+    const imgs = await evalWeb("({ shown: [...d.querySelectorAll('.inline-img')].map(i => ({ w: i.naturalWidth, src: i.src.slice(0, 22), alt: i.alt })), denied: [...d.querySelectorAll('.img-denied')].map(x => x.textContent), remote: [...d.querySelectorAll('img')].filter(i => /example.com/.test(i.src)).length, inTool: !!d.querySelector('.tool-image .inline-img') })");
+    check("a workspace image in an assistant message and a read_file of an image are shown from the file", imgs.shown.length === 2 && imgs.shown.every((i) => i.w === 1 && i.src === "data:image/png;base64,") && imgs.inTool, JSON.stringify(imgs));
+    check("an image outside the workspace and a web address are not shown, each with its reason, and nothing is fetched", imgs.denied.some((x) => /secret.*outside this chat's folders/.test(x)) && imgs.denied.some((x) => /web.*never addresses/.test(x)) && imgs.remote === 0, JSON.stringify(imgs.denied));
+    await shot("33-workspace-images");
     await evalWeb("(() => { w.postMessage({ type: 'reset' }, '*'); return true; })()");
   }
 

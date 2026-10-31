@@ -105,6 +105,19 @@ Risco central: controle de navegador é a ação de maior impacto. Cada domínio
 | O modelo **gerar** imagens | **Nada no contrato** sobre saída de imagem; o catálogo de modelos não declara modalidades | Condicionado: só habilitar se o host entregar o conteúdo. Hoje desconhecido |
 | Mensagem do usuário com imagem | Só metadados voltam; os bytes não | Miniaturas locais (**pronto**) |
 
+**Estado da 3C (feita até onde o host permite):**
+
+| Caso | Estado |
+|---|---|
+| Imagens que o **modelo viu** por uma ferramenta | **Não é possível pelo protocolo, medido.** Um turno real com `read_file` num PNG devolveu só o texto "Read image file ... as model-visible image output, media_type: image/png, source_bytes: 158"; o item **não** trouxe `modelVisibleContent` nem `outputRef`, nem ao vivo nem no histórico retomado, então `item/readOutput` não tem o que buscar |
+| Arquivo de imagem lido por `read_file` | **Pronto**: o cartão da ferramenta mostra a miniatura **do arquivo no disco** (a Antares lê o arquivo, não o que o modelo recebeu) |
+| `![alt](caminho)` numa resposta do assistente | **Pronto**, só para arquivos do workspace (ou de pastas adicionadas) |
+| Regras de leitura (na extensão, nunca na página) | Sem URL nem caminho de rede (nada é buscado); só PNG, JPEG, GIF e WebP (SVG fica de fora de propósito); dentro das pastas do chat depois de resolver links simbólicos e nomes curtos; até 5 MB; os bytes precisam ser mesmo daquele tipo. Recusas aparecem no lugar da imagem com o motivo |
+| O modelo **gerar** imagens | **Sem suporte no contrato** e nada observado; continua condicionado a o host entregar o conteúdo |
+| Mensagem do usuário com imagem | Miniaturas locais (pronto desde a fase 1) |
+
+Verificado: 8 testes unitários novos (163 no total) cobrindo cada recusa; janela real no VS Code e no Antigravity IDE (42 checagens), com uma imagem válida, uma fora do workspace e um endereço web numa resposta e um `read_file` de imagem. **Não verificado com um turno real na interface:** os cartões e a resposta chegam por eventos sintéticos na janela real.
+
 ### 3D. Apresentação das ferramentas e diffs (primeira fatia pronta)
 
 Observado com **um** turno real em pasta descartável (`scripts/probe-approval.ts` com `PROBE_LABEL=tools`): ferramentas `write_file {path, content}`, `edit_file {path, find, replace}`, `write_todos {todos: [{text, status}]}`, `read_file {path}`. As de arquivo trazem **`patchSummary {files, added, removed}`** e **`patchRef`** (um JSON do próprio host com `files[].hunks[]` de linhas `+`, `-` e contexto); `session/todoListChanged` traz a lista com `completed`, `inProgress`, `pending`. Os argumentos já vêm no `item/started`; o patch só quando a chamada termina.

@@ -5,6 +5,7 @@
  * Approval shapes were observed from the real host for network and shell requests (a sanitized
  * copy is test/fixtures/real-approvals.json); other subject kinds follow the exported schema.
  */
+import { imageTypeFor } from "./composer.ts";
 
 export interface ModelInfo {
   modelId: string;
@@ -149,6 +150,8 @@ export type ChatEvent =
       todos?: TodoView[];
       /** A `write_file` or `edit_file` call: which file, and how much changed when the host says. */
       file?: { op: "write" | "edit"; path: string; added?: number; removed?: number };
+      /** A `read_file` of an image file: its path, so the page can ask the extension to show it (see localImages.ts). */
+      imagePath?: string;
       /** The host's patch artifact for the call (see patches.ts); read by the extension, never by the page. */
       patchRef?: { path: string; byteLen?: number };
     }
@@ -421,6 +424,7 @@ function toolDetails(tool: string, args: Obj | undefined, item: Obj): { summary?
     const done = todos.filter((t) => t.status === "completed").length;
     return { summary: `${todos.length} task${todos.length === 1 ? "" : "s"}, ${done} done`, extra: { todos } };
   }
+  if (tool === "read_file" && args && str(args.path) && imageTypeFor(str(args.path)!)) return { summary: str(args.path), extra: { imagePath: str(args.path)! } };
   if ((tool === "write_file" || tool === "edit_file") && args && str(args.path)) {
     const summary = isObj(item.patchSummary) ? item.patchSummary : undefined;
     const ref = isObj(item.patchRef) && str(item.patchRef.path) ? { path: str(item.patchRef.path)!, byteLen: num(item.patchRef.byteLen) } : undefined;

@@ -44,6 +44,8 @@
     tools: new Map(), // itemId -> element
     toolEvents: new Map(), // itemId -> the last toolCall event, so a patch that arrives later can redraw the card
     patches: new Map(), // itemId -> the host's patch for a file edit, as read by the extension
+    images: new Map(), // workspace path -> { ok, dataUrl | reason }: images the extension read for the chat
+    imageAsked: new Set(), // paths already requested, so streaming repaints do not ask again
     approvals: new Map(), // approvalId -> { el, event, decided }
     sessions: [], // stored sessions shown in the history panel
     currentSessionId: undefined,
@@ -85,6 +87,8 @@
   // ---- tiny, safe markdown: fenced code, inline code, bold, paragraphs ----
   function inline(text) {
     return escapeHtml(text)
+      // ![alt](path): only a placeholder here; the extension decides whether the file may be shown (hydrateImages)
+      .replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, '<span class="img-ref" data-path="$2">$1</span>')
       .replace(/`([^`\n]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   }
@@ -143,6 +147,43 @@
     const body = item.el.querySelector(".body");
     if (item.role === "user") renderUserBody(body, item);
     else body.innerHTML = renderMarkdown(item.text);
+    hydrateImages(body);
+  }
+
+  // ---- images from the workspace: the page only asks; the extension reads the file and checks it ----
+  function fillImage(span, result) {
+    span.classList.remove("img-pending");
+    if (result.ok) {
+      const img = el("img", "inline-img");
+      img.src = result.dataUrl;
+      img.alt = span.textContent || span.dataset.path;
+      img.title = span.dataset.path;
+      span.replaceChildren(img);
+    } else {
+      span.classList.add("img-denied");
+      span.textContent = (span.textContent || span.dataset.path) + " (image not shown: " + result.reason + ")";
+    }
+  }
+  function hydrateImages(root) {
+    for (const span of root.querySelectorAll(".img-ref:not(.img-done)")) {
+      const path = span.dataset.path;
+      if (!path) continue;
+      const known = state.images.get(path);
+      if (known) {
+        span.classList.add("img-done");
+        fillImage(span, known);
+      } else {
+        span.classList.add("img-pending");
+        if (!state.imageAsked.has(path)) {
+          state.imageAsked.add(path);
+          vscode.postMessage({ type: "loadImage", path });
+        }
+      }
+    }
+  }
+  function onImage(msg) {
+    state.images.set(msg.path, msg);
+    hydrateImages(document);
   }
   // The host appends "[Image #n]" markers to the text of a message with images and does not send the
   // bytes back, so the markers become chips and the thumbnails are the ones kept locally.
@@ -197,6 +238,14 @@
     head.append(el("span", "badge", e.failure ? "failed" : e.status));
     node.append(head);
     if (e.todos && e.todos.length) node.append(todoList(e.todos));
+    if (e.imagePath) {
+      const slot = el("div", "tool-image");
+      const ref = el("span", "img-ref", e.imagePath);
+      ref.dataset.path = e.imagePath;
+      slot.append(ref);
+      node.append(slot);
+      hydrateImages(slot);
+    }
     if (e.held) node.append(el("div", "tool-note", "held" + (e.heldFor ? " for " + e.heldFor : "")));
     if (e.failure) node.append(el("div", "tool-fail", e.failure));
     if (e.failure && e.hint) node.append(el("div", "tool-hint", e.hint));
@@ -735,6 +784,7 @@
     else if (msg.type === "voiceError") onVoiceError(msg);
     else if (msg.type === "picked") onPicked(msg);
     else if (msg.type === "patch") onPatch(msg);
+    else if (msg.type === "image") onImage(msg);
     else if (msg.type === "folders") renderFolders(msg.folders || []);
     else if (msg.type === "skills") onSkills(msg);
     else if (msg.type === "extras") onExtras(msg);
@@ -745,6 +795,8 @@
       state.pending.clear();
       state.toolEvents.clear();
       state.patches.clear();
+      state.images.clear();
+      state.imageAsked.clear();
       renderPending();
       state.skills = undefined;
       state.skillsError = undefined;

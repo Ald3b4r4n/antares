@@ -8,6 +8,7 @@ import { canonicalPath, imageTypeFor, mentionFor, rootsFor } from "../muse/compo
 import { countChanges, normalizeHostPath, readPatch, relativeToRoots, reversePatch, type PatchFile } from "../muse/patches.ts";
 import type { OriginalProvider } from "./originalProvider.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
+import { loadWorkspaceImage } from "../muse/localImages.ts";
 import { listMcpServers } from "../muse/mcp.ts";
 import { httpsOrigin, oauthSignIn, oauthSignOut } from "../muse/mcpLogin.ts";
 import { describeCapabilities, listAvailablePlugins, validatePlugin } from "../muse/pluginCli.ts";
@@ -33,6 +34,7 @@ type FromWebview =
   | { type: "connectorSignOut"; server: string }
   | { type: "connectorCancel" }
   | { type: "unqueue"; turnId: string }
+  | { type: "loadImage"; path: string }
   | { type: "openFile"; itemId: string; path: string }
   | { type: "openDiff"; itemId: string; path: string }
   | { type: "stop" }
@@ -244,6 +246,9 @@ export class ChatPanel {
         break;
       case "unqueue":
         await this.unqueue(message.turnId);
+        break;
+      case "loadImage":
+        await this.loadImage(message.path);
         break;
       case "openFile":
         await this.openPatchedFile(message.itemId, message.path, false);
@@ -527,6 +532,13 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
   private openableRoots(): string[] {
     const root = this.workspaceFolder();
     return root ? rootsFor(root, this.extraRoots).map((r) => normalizeHostPath(canonicalPath(r))) : [];
+  }
+
+  /** Reads a workspace image the page asked to show, with every check in localImages.ts, and answers with the data or the reason. */
+  private async loadImage(path: string): Promise<void> {
+    if (typeof path !== "string") return;
+    const result = await loadWorkspaceImage(path, this.openableRoots());
+    this.post(result.ok ? { type: "image", path, ok: true, dataUrl: result.dataUrl, bytes: result.bytes } : { type: "image", path, ok: false, reason: result.reason });
   }
 
   /** Reads the patch of a finished file tool call (also those replayed from history) and sends it to the page. */
