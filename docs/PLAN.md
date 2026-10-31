@@ -77,7 +77,7 @@ O que o MSP realmente oferece (ver PROTOCOL-NOTES, "what a client can configure"
 |---|---|---|
 | **Conectores (MCP)** | Listar (**feito**, somente leitura) e **entrar/sair por OAuth** (`mcpServer/oauthLogin` devolve a URL que o cliente abre no navegador; `oauthLogout`). Experimental | **Adicionar, remover ou editar** servidores: não há chave de configuração no MSP. Vêm da configuração do próprio Muse ou de um plugin |
 | **Plugins** | Listar (**feito**), instalar (marketplace ou pasta local), adicionar/atualizar/remover marketplaces. Estáveis. Instalar **executa código de terceiros**: confirmação com origem e escopo | Desinstalar e ligar/desligar: não há método |
-| **Skills** | Listar (**feito**), ligar/desligar por escopo (`on`, `userInvocableOnly`, `off`), importar de Claude/Codex com **prévia** (`dryRun`) | Criar/editar skill |
+| **Skills** | Listar (**feito**), importar de Claude/Codex com **prévia** (`dryRun`, sondado: funciona e não grava). Ligar/desligar por escopo (`on`, `userInvocableOnly`, `off`) **funciona ao escrever, mas o estado atual não pode ser lido de volta** (as linhas de `skill/list` não trazem a ativação e uma skill `off` continua listada), então uma chave liga/desliga seria às cegas | Criar/editar skill; mostrar o estado de ativação |
 | **Configurações do host** | Nove chaves: `tools.web_fetch.enabled`, `tools.web_search.mode`, `reasoning_effort`, `model`, `provider`, `permissions.default_profile`, `run.workflow_trigger_mode`, `tools.artifact.enabled` (experimental) | Qualquer outra coisa |
 | **Hooks** | Listar (`hook/list`, somente leitura) | Gerenciar |
 
