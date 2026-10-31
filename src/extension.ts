@@ -5,6 +5,7 @@ import * as vscode from "vscode";
 import { locateMuse } from "./muse/locate.ts";
 import { runSelfTest } from "./muse/selftest.ts";
 import { ChatPanel } from "./ui/chatPanel.ts";
+import { ORIGINAL_SCHEME, OriginalProvider } from "./ui/originalProvider.ts";
 import { UsageTracker } from "./ui/usageTracker.ts";
 import { setupVoice } from "./ui/voiceBridge.ts";
 
@@ -38,9 +39,12 @@ export function activate(context: vscode.ExtensionContext): AntaresApi {
     }
   };
 
+  const originals = new OriginalProvider();
+  ChatPanel.originals = originals;
   context.subscriptions.push(
     output,
     tracker,
+    vscode.workspace.registerTextDocumentContentProvider(ORIGINAL_SCHEME, originals),
     vscode.commands.registerCommand("antares.open", () => ChatPanel.show(context, tracker)),
     vscode.commands.registerCommand("antares.refreshUsage", async () => {
       try {

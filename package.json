@@ -176,6 +176,11 @@
           "default": false,
           "markdownDescription": "Development only: fake recorder and transcriber (no microphone, no engine)."
         },
+        "antares.dev.patch": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Development only: path of a host patch file (`*-tool_patch.json` under a `tool-outputs` folder). When set, the panel shows a todo list and an `edit_file` call for that patch as soon as it opens, so the diff view can be checked without a model turn."
+        },
         "antares.dev.picks": {
           "type": "array",
           "items": { "type": "string" },
@@ -194,7 +199,7 @@
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
     "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
-    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts test/unit/composer.test.ts test/unit/modes.test.ts",
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts test/unit/composer.test.ts test/unit/modes.test.ts test/unit/patches.test.ts",
     "test:e2e": "node esbuild.mjs && node scripts/e2e-editor.mjs"
   },
   "devDependencies": {

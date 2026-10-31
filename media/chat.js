@@ -42,6 +42,8 @@
     running: false,
     items: new Map(), // itemId -> { el, text, role, raf }
     tools: new Map(), // itemId -> element
+    toolEvents: new Map(), // itemId -> the last toolCall event, so a patch that arrives later can redraw the card
+    patches: new Map(), // itemId -> the host's patch for a file edit, as read by the extension
     approvals: new Map(), // approvalId -> { el, event, decided }
     sessions: [], // stored sessions shown in the history panel
     currentSessionId: undefined,
@@ -178,6 +180,7 @@
 
   // ---- tool calls ----
   function upsertTool(e) {
+    state.toolEvents.set(e.itemId, e);
     let node = state.tools.get(e.itemId);
     if (!node) {
       node = el("div", "tool");
@@ -187,16 +190,75 @@
     node.className = "tool " + (e.failure ? "failed" : e.status === "completed" ? "done" : "running");
     node.replaceChildren();
     const head = el("div", "tool-head");
-    head.append(el("span", "tool-name", e.tool), el("span", "tool-summary", e.summary), el("span", "badge", e.failure ? "failed" : e.status));
+    const patch = state.patches.get(e.itemId);
+    const changed = e.file && (e.file.added !== undefined || e.file.removed !== undefined) ? "+" + (e.file.added || 0) + " \u2212" + (e.file.removed || 0) : "";
+    head.append(el("span", "tool-name", e.tool), el("span", "tool-summary", patch && patch[0] && patch[0].rel ? patch[0].rel : e.summary));
+    if (changed && !patch) head.append(el("span", "tool-changed", changed)); // with a patch the diff header shows the counts
+    head.append(el("span", "badge", e.failure ? "failed" : e.status));
     node.append(head);
+    if (e.todos && e.todos.length) node.append(todoList(e.todos));
     if (e.held) node.append(el("div", "tool-note", "held" + (e.heldFor ? " for " + e.heldFor : "")));
     if (e.failure) node.append(el("div", "tool-fail", e.failure));
     if (e.failure && e.hint) node.append(el("div", "tool-hint", e.hint));
+    if (patch && !e.failure) node.append(patchBlock(e.itemId, patch));
     if (e.output) {
       const details = el("details", "tool-out");
       details.append(el("summary", "", "output"), el("pre", "", e.output));
       node.append(details);
     }
+  }
+
+  // A checklist the agent keeps (write_todos): done, in progress, to do.
+  function todoList(items) {
+    const list = el("ul", "todos");
+    for (const t of items) {
+      const mark = t.status === "completed" ? "\u2713" : t.status === "inProgress" ? "\u25B8" : "\u25CB";
+      const li = el("li", "todo " + t.status);
+      li.append(el("span", "todo-mark", mark), el("span", "todo-text", t.text));
+      list.append(li);
+    }
+    return list;
+  }
+
+  // The host's own patch for a file edit: a compact inline diff, and buttons for VS Code's diff editor and the file.
+  const PATCH_LINES = 60;
+  function patchBlock(itemId, files) {
+    const wrap = el("div", "patch");
+    for (const f of files) {
+      const head = el("div", "patch-head");
+      head.append(el("span", "patch-path", f.rel || f.path), el("span", "tool-changed", "+" + f.added + " \u2212" + f.removed));
+      if (f.openable) {
+        const diffBtn = el("button", "link tiny", "Open diff");
+        diffBtn.title = "Open VS Code's diff editor: this file before and after the edit";
+        diffBtn.addEventListener("click", () => vscode.postMessage({ type: "openDiff", itemId, path: f.path }));
+        const openBtn = el("button", "link tiny", "Open file");
+        openBtn.addEventListener("click", () => vscode.postMessage({ type: "openFile", itemId, path: f.path }));
+        head.append(diffBtn, openBtn);
+      }
+      wrap.append(head);
+      const pre = el("div", "patch-lines");
+      let shown = 0;
+      let total = 0;
+      for (const h of f.hunks) total += h.lines.length;
+      for (const h of f.hunks) {
+        if (shown >= PATCH_LINES) break;
+        pre.append(el("div", "patch-hunk", "@@ -" + h.oldStart + "," + h.oldLines + " +" + h.newStart + "," + h.newLines + " @@"));
+        for (const line of h.lines) {
+          if (shown >= PATCH_LINES) break;
+          const kind = line[0] === "+" ? "add" : line[0] === "-" ? "del" : "ctx";
+          pre.append(el("div", "patch-line " + kind, line));
+          shown++;
+        }
+      }
+      if (total > shown) pre.append(el("div", "patch-more", "\u2026 " + (total - shown) + " more lines" + (f.openable ? " (open the diff)" : "")));
+      wrap.append(pre);
+    }
+    return wrap;
+  }
+  function onPatch(msg) {
+    state.patches.set(msg.itemId, msg.files || []);
+    const e = state.toolEvents.get(msg.itemId);
+    if (e) upsertTool(e);
   }
 
   // ---- approvals ----
@@ -647,6 +709,7 @@
     else if (msg.type === "voiceResult") onVoiceResult(msg);
     else if (msg.type === "voiceError") onVoiceError(msg);
     else if (msg.type === "picked") onPicked(msg);
+    else if (msg.type === "patch") onPatch(msg);
     else if (msg.type === "folders") renderFolders(msg.folders || []);
     else if (msg.type === "skills") onSkills(msg);
     else if (msg.type === "extras") onExtras(msg);
@@ -655,6 +718,8 @@
       closeExtras();
       closeMenus();
       state.pending.clear();
+      state.toolEvents.clear();
+      state.patches.clear();
       renderPending();
       state.skills = undefined;
       state.skillsError = undefined;
@@ -667,7 +732,7 @@
       state.tools.clear();
       state.approvals.clear();
       state.tokens = state.context = undefined;
-      state.sandbox = undefined;
+      state.sandbox = state.sandboxNote = undefined; // the next host reports it again
       state.turnNote = "";
       setRunning(false, "Ready");
     } else if (msg.type === "copied") {

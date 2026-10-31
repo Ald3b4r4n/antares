@@ -49,6 +49,11 @@ export interface ApprovalSubjectView {
 }
 
 /** Permission profiles built into the Muse contract. Notes state only what was observed or published. */
+export interface TodoView {
+  text: string;
+  status: "pending" | "inProgress" | "completed";
+}
+
 export const PROFILES: { id: string; label: string; note: string }[] = [
   { id: ":read-only", label: "Read-only", note: "Reading only. Antares also disables shell and file-write tools at the host." },
   {
@@ -128,6 +133,12 @@ export type ChatEvent =
       /** Help for a failure Antares recognizes (see `failureHint`). */
       hint?: string;
       output?: string;
+      /** A `write_todos` call: the checklist it set. */
+      todos?: TodoView[];
+      /** A `write_file` or `edit_file` call: which file, and how much changed when the host says. */
+      file?: { op: "write" | "edit"; path: string; added?: number; removed?: number };
+      /** The host's patch artifact for the call (see patches.ts); read by the extension, never by the page. */
+      patchRef?: { path: string; byteLen?: number };
     }
   | {
       type: "approvalRequested";
@@ -372,20 +383,61 @@ export function sandboxNote(availability: string | undefined, platform: string =
   return `Muse's sandbox is not available on this computer. In this mode shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}`;
 }
 
+function parseArgs(args: unknown): Obj | undefined {
+  if (isObj(args)) return args;
+  if (typeof args !== "string") return undefined;
+  try {
+    const parsed: unknown = JSON.parse(args);
+    return isObj(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function todoStatus(value: unknown): TodoView["status"] {
+  const s = typeof value === "string" ? value.toLowerCase().replace(/[^a-z]/g, "") : "";
+  return s === "completed" || s === "done" ? "completed" : s === "inprogress" || s === "active" ? "inProgress" : "pending";
+}
+
+/** What the page shows for the tools Antares knows (todo list, file writes and edits); nothing for the rest. */
+function toolDetails(tool: string, args: Obj | undefined, item: Obj): { summary?: string; extra: Partial<Extract<ChatEvent, { type: "toolCall" }>> } {
+  if (tool === "write_todos" && args && Array.isArray(args.todos)) {
+    const todos: TodoView[] = [];
+    for (const t of args.todos) if (isObj(t) && str(t.text)) todos.push({ text: clip(str(t.text)!, 300), status: todoStatus(t.status) });
+    const done = todos.filter((t) => t.status === "completed").length;
+    return { summary: `${todos.length} task${todos.length === 1 ? "" : "s"}, ${done} done`, extra: { todos } };
+  }
+  if ((tool === "write_file" || tool === "edit_file") && args && str(args.path)) {
+    const summary = isObj(item.patchSummary) ? item.patchSummary : undefined;
+    const ref = isObj(item.patchRef) && str(item.patchRef.path) ? { path: str(item.patchRef.path)!, byteLen: num(item.patchRef.byteLen) } : undefined;
+    return {
+      summary: str(args.path),
+      extra: {
+        file: { op: tool === "write_file" ? "write" : "edit", path: str(args.path)!, added: num(summary?.added), removed: num(summary?.removed) },
+        ...(ref ? { patchRef: ref } : {}),
+      },
+    };
+  }
+  return { extra: {} };
+}
+
 function mapToolCall(item: Obj, itemId: string): ChatEvent {
   const failure = str(item.failureReason);
   const output = str(item.visibleOutput);
+  const tool = str(item.tool) ?? "tool";
+  const details = toolDetails(tool, parseArgs(item.args), item);
   return {
     type: "toolCall",
     itemId,
-    tool: str(item.tool) ?? "tool",
-    summary: summarizeArgs(item.args),
+    tool,
+    summary: details.summary ?? summarizeArgs(item.args),
     status: str(item.status) ?? "inProgress",
     held: item.held === true,
     heldFor: str(item.heldFor),
     failure: failure ? clip(failure, 600) : undefined,
     hint: failureHint(failure),
     output: output && !failure ? clip(output, 600) : undefined,
+    ...details.extra,
   };
 }
 

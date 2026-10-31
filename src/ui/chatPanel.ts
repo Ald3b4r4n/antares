@@ -4,7 +4,9 @@ import { basename } from "node:path";
 import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
 import { cycleMode, DEFAULT_MODE, modeById, modeOfProfile, modeRows } from "../muse/modes.ts";
-import { imageTypeFor, mentionFor, rootsFor } from "../muse/composer.ts";
+import { canonicalPath, imageTypeFor, mentionFor, rootsFor } from "../muse/composer.ts";
+import { countChanges, normalizeHostPath, readPatch, relativeToRoots, reversePatch, type PatchFile } from "../muse/patches.ts";
+import type { OriginalProvider } from "./originalProvider.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
 import { listMcpServers } from "../muse/mcp.ts";
 import { locateMuse } from "../muse/locate.ts";
@@ -23,6 +25,8 @@ type FromWebview =
   | { type: "listConnectors" }
   | { type: "listPlugins" }
   | { type: "unqueue"; turnId: string }
+  | { type: "openFile"; itemId: string; path: string }
+  | { type: "openDiff"; itemId: string; path: string }
   | { type: "stop" }
   | { type: "newChat" }
   | { type: "setMode"; modeId: string }
@@ -51,6 +55,12 @@ const KNOWN_PROFILES = new Set(PROFILES.map((p) => p.id));
 /** The Antares chat panel: one webview, one Muse session at a time. */
 export class ChatPanel {
   private static current: ChatPanel | undefined;
+  /** Serves the "before" side of a diff; set when the extension activates. */
+  static originals: OriginalProvider | undefined;
+  /** The host's patch for each file tool call shown in this chat, by item id (read by this class, never by the page). */
+  private readonly patches = new Map<string, PatchFile[]>();
+  /** Whether this chat has any conversation yet (a turn ran here, or a stored session was replayed). */
+  private hasConversation = false;
   private readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
   private readonly tracker: UsageTracker;
@@ -207,6 +217,12 @@ export class ChatPanel {
       case "unqueue":
         await this.unqueue(message.turnId);
         break;
+      case "openFile":
+        await this.openPatchedFile(message.itemId, message.path, false);
+        break;
+      case "openDiff":
+        await this.openPatchedFile(message.itemId, message.path, true);
+        break;
       case "stop":
         await this.session?.interrupt();
         break;
@@ -245,6 +261,7 @@ export class ChatPanel {
         this.postConfig();
         void this.warm();
         void this.refreshUsage(true);
+        this.devToolDemo();
         break;
       case "rendered":
         this.testState.rendered = { messages: message.messages, userMessages: message.userMessages, codeBlocks: message.codeBlocks, copyButtons: message.copyButtons };
@@ -256,6 +273,8 @@ export class ChatPanel {
     await this.session?.stop();
     this.session = undefined;
     this.profile = profile;
+    this.patches.clear();
+    this.hasConversation = false;
     if (!keepFolders) this.extraRoots = []; // folders added to a chat end with it
     this.post({ type: "reset" });
     this.postFolders();
@@ -291,6 +310,8 @@ export class ChatPanel {
     await this.session?.stop();
     this.session = undefined;
     this.currentSessionId = undefined;
+    this.patches.clear();
+    this.hasConversation = false;
     if (!keepFolders) this.extraRoots = [];
     this.post({ type: "reset" });
     this.postFolders();
@@ -367,12 +388,21 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       return;
     }
     const before = this.profile;
+    const sessionId = this.currentSessionId!;
+    const hadConversation = this.hasConversation;
     this.profile = mode.profileId;
-    if (await this.openStored(this.currentSessionId!, "resume", true)) {
+    if (await this.openStored(sessionId, "resume", true)) {
       this.notice("info", `Switched to ${mode.label} (${mode.profileId}). The conversation continued from Muse's stored history.`);
+    } else if (!hadConversation) {
+      // Nothing was said yet, and the host may not have written an empty session before it stopped (seen: "session not
+      // found" on resume about one run in five). There is nothing to continue, so start fresh in the new mode.
+      await this.restart(mode.profileId, true);
+      this.notice("info", `Switched to ${mode.label} (${mode.profileId}). This chat had no messages yet, so it started fresh.`);
     } else {
-      this.profile = before; // the old mode is what the next message would use
-      this.notice("warning", `The mode is still ${modeOfProfile(before)?.label ?? before}. The earlier conversation is in History.`);
+      // The conversation matters: put it back under the mode it had, instead of leaving an empty chat.
+      this.profile = before;
+      if (await this.openStored(sessionId, "resume", true)) this.notice("warning", `Could not switch to ${mode.label}. The conversation is back under ${modeOfProfile(before)?.label ?? before}.`);
+      else this.notice("error", `Could not switch to ${mode.label}, and the conversation could not be reopened. It is in History.`);
     }
     this.postConfig();
   }
@@ -429,9 +459,11 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       // Usage and token events also feed the shared tracker (status bar, alerts, ledger); the page gets
       // the merged usage, which carries the plan name and the observation time.
       if (event.type === "session") this.currentSessionId = event.sessionId;
+      if (event.type === "turnStarted" || (event.type === "history" && event.events.length > 0)) this.hasConversation = true;
       const extras = this.tracker.handle(event);
       this.post({ type: "event", event: event.type === "usage" ? (this.tracker.latest() ?? event) : event });
       for (const extra of extras) this.post({ type: "event", event: extra });
+      this.afterEvent(event);
     });
     session.on("exit", (code: number | null) => {
       if (this.session === session) {
@@ -458,6 +490,80 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       await session.send(text, checked.images, mode ? { ifBusy: mode } : {});
     } catch (error) {
       this.notice("error", `Could not send the message: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ---- file edits: the host's patch, shown as a diff ----
+
+  /** The folders whose files this chat may open from a tool card: the workspace and the folders added to it. */
+  private openableRoots(): string[] {
+    const root = this.workspaceFolder();
+    return root ? rootsFor(root, this.extraRoots).map((r) => normalizeHostPath(canonicalPath(r))) : [];
+  }
+
+  /** Reads the patch of a finished file tool call (also those replayed from history) and sends it to the page. */
+  private afterEvent(event: ChatEvent): void {
+    if (event.type === "toolCall" && event.patchRef && event.status === "completed") void this.showPatch(event.itemId, event.patchRef);
+    if (event.type === "history") for (const past of event.events) if (past.type === "toolCall" && past.patchRef && past.status === "completed") void this.showPatch(past.itemId, past.patchRef);
+  }
+
+  private async showPatch(itemId: string, ref: { path: string; byteLen?: number }): Promise<void> {
+    const files = await readPatch(ref);
+    if (files.length === 0) return;
+    this.patches.set(itemId, files);
+    const roots = this.openableRoots();
+    this.post({
+      type: "patch",
+      itemId,
+      files: files.map((f) => {
+        const rel = relativeToRoots(normalizeHostPath(canonicalPath(f.path)), roots);
+        return { path: f.path, rel, openable: rel !== undefined, hunks: f.hunks, ...countChanges(f) };
+      }),
+    });
+  }
+
+  /**
+   * Opens a file a tool call changed, or VS Code's diff of it. Only a file named by the host's patch for that call
+   * and inside this chat's folders can be opened. The "before" side is rebuilt from the patch and the file as it
+   * is now; if the file changed since, that is not possible and the file is shown instead, with a note.
+   */
+  private async openPatchedFile(itemId: string, path: string, diff: boolean): Promise<void> {
+    const file = this.patches.get(itemId)?.find((f) => f.path === path);
+    if (!file) return;
+    const disk = normalizeHostPath(canonicalPath(file.path));
+    if (relativeToRoots(disk, this.openableRoots()) === undefined) {
+      this.notice("warning", "That file is outside this chat's folders, so Antares does not open it from here.");
+      return;
+    }
+    const uri = vscode.Uri.file(disk);
+    try {
+      if (diff) {
+        const current = await readFile(disk, "utf8");
+        const before = reversePatch(current, file.hunks);
+        const originals = ChatPanel.originals;
+        if (before !== undefined && originals) {
+          await vscode.commands.executeCommand("vscode.diff", originals.add(basename(disk), before), uri, `${basename(disk)} (before ↔ after this edit)`);
+          return;
+        }
+        this.notice("info", "The file changed after this edit, so its earlier version cannot be rebuilt. Showing the file itself.");
+      }
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
+    } catch (error) {
+      this.notice("warning", `Could not open the file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Development only (`antares.dev.patch`): shows a todo list and an edit_file call for a given patch file. */
+  private devToolDemo(): void {
+    const patch = vscode.workspace.getConfiguration("antares").get<string>("dev.patch", "");
+    if (!patch) return;
+    const demo: ChatEvent[] = [
+      { type: "toolCall", itemId: "demo-todos", tool: "write_todos", summary: "2 tasks, 1 done", status: "completed", held: false, todos: [{ text: "Create plan.txt", status: "completed" }, { text: "Change line 2 to BETA", status: "inProgress" }] },
+      { type: "toolCall", itemId: "demo-edit", tool: "edit_file", summary: "plan.txt", status: "completed", held: false, file: { op: "edit", path: "plan.txt", added: 1, removed: 1 }, patchRef: { path: patch } },
+    ];
+    for (const event of demo) {
+      this.post({ type: "event", event });
+      this.afterEvent(event);
     }
   }
 

@@ -38,7 +38,13 @@ writeFileSync(
   join(userData, "User", "settings.json"),
   JSON.stringify({ "workbench.startupEditor": "none", "security.workspace.trust.enabled": false, "telemetry.telemetryLevel": "off", "update.mode": "none", "extensions.autoCheckUpdates": false, "workbench.tips.enabled": false, "window.restoreWindows": "none", "workbench.colorTheme": "Default Dark Modern", "chat.disableAIFeatures": true, "window.dialogStyle": "custom", "workbench.secondarySideBar.defaultVisibility": "hidden" }, null, 2),
 );
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+// A host patch for the tool-presentation check (echo flow only): plan.txt as it is after the edit, and the patch
+// that produced it, in the folder layout the host uses. The extension is told to show it with antares.dev.patch.
+const patchFile = join(work, "tool-outputs", "t1", "call_1-tool_patch.json");
+mkdirSync(join(work, "tool-outputs", "t1"), { recursive: true });
+writeFileSync(join(workspace, "plan.txt"), "alpha\nBETA\ngamma\n");
+writeFileSync(patchFile, JSON.stringify({ files: [{ path: join(workspace, "plan.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] }));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 
 const child = spawn(
@@ -104,6 +110,7 @@ const check = (name, ok, detail) => {
 };
 
 let browser;
+let evalWebSafe = async () => undefined; // set once the page is reachable; used only to describe a failure
 try {
   const targets = await waitFor("the debugging endpoint", async () => (await fetch(`http://127.0.0.1:${port}/json`)).json(), 40000);
   const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
@@ -200,6 +207,7 @@ try {
     await waitFor("the Antares webview (second attempt)", findWebview, 30000);
   }
   const evalWeb = (expression) => evalIn(webSession, expression);
+  evalWebSafe = (expression) => evalWeb(expression).catch((e) => ({ unreachable: e.message }));
   await waitFor("chat.js to start inside the real webview", () => evalWeb("!!d.getElementById('input') && d.getElementById('meta').children.length > 0"), 30000);
   await sleep(1500);
   check("panel opens from the command palette in the real editor", true);
@@ -222,6 +230,24 @@ try {
   check("the mode selector lists Auto, Manual (unavailable), Accept edits, Plan and Bypass, starting in Plan", JSON.stringify(dom.modes) === JSON.stringify(["auto", "manual(unavailable)", "acceptEdits", "plan", "bypass"]) && dom.modeLabel === "Plan", JSON.stringify({ modes: dom.modes, label: dom.modeLabel }));
   check("model and effort controls exist", dom.modelControls);
   check("page styles loaded", dom.cssLoaded);
+
+  if (!MODES && !REAL) {
+    // Tool presentation: a checklist instead of JSON, and a file edit as a diff with buttons to open VS Code's diff.
+    await waitFor("the demo tool cards", () => evalWeb("d.querySelectorAll('.tool').length >= 2 && d.querySelectorAll('.patch-line').length > 0"), 20000);
+    const cards = await evalWeb("({ todos: [...d.querySelectorAll('.todo')].map(x => x.className.replace('todo ', '') + ':' + x.querySelector('.todo-text').textContent), todoSummary: d.querySelector('.tool .tool-summary').textContent, edit: { summary: [...d.querySelectorAll('.tool-summary')].pop().textContent, changed: d.querySelector('.patch-head .tool-changed')?.textContent, lines: [...d.querySelectorAll('.patch-line')].map(x => x.className.replace('patch-line ', '') + ':' + x.textContent), buttons: [...d.querySelectorAll('.patch-head button')].map(b => b.textContent) } })");
+    check("write_todos shows a checklist with done and in-progress items, not JSON", JSON.stringify(cards.todos) === JSON.stringify(["completed:Create plan.txt", "inProgress:Change line 2 to BETA"]) && cards.todoSummary === "2 tasks, 1 done", JSON.stringify({ todos: cards.todos, summary: cards.todoSummary }));
+    check("edit_file shows the file relative to the workspace, the counts and the host's diff lines", cards.edit.summary === "plan.txt" && cards.edit.changed === "+1 \u22121" && JSON.stringify(cards.edit.lines) === JSON.stringify(["ctx: alpha", "del:-beta", "add:+BETA", "ctx: gamma"]), JSON.stringify(cards.edit));
+    check("the diff card offers Open diff and Open file for a file inside the workspace", JSON.stringify(cards.edit.buttons) === JSON.stringify(["Open diff", "Open file"]), JSON.stringify(cards.edit.buttons));
+    await shot("26-tool-cards");
+    await evalWeb("(() => { [...d.querySelectorAll('.patch-head button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
+    const diffTab = await waitFor("VS Code's diff editor", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
+    check("Open diff opens VS Code's diff editor on the file before and after the edit", /plan\.txt \(before/.test(diffTab), JSON.stringify(diffTab));
+    await waitFor("the diff editor to paint its lines", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 0 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
+    const sides = await evalPage("(() => ({ original: [...document.querySelectorAll('.monaco-diff-editor .editor.original .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')), modified: [...document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')) }))()");
+    check("the before side was rebuilt from the patch (beta) and the after side is the file (BETA)", sides.original.some((l) => /beta/.test(l)) && !sides.original.some((l) => /BETA/.test(l)) && sides.modified.some((l) => /BETA/.test(l)), JSON.stringify(sides));
+    await shot("27-diff-editor");
+    await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
+  }
 
   if (MODES) {
     const openMenu = () => evalWeb("(() => { d.getElementById('modeBtn').click(); return true; })()");
@@ -262,6 +288,7 @@ try {
     await shot("24-accept-edits");
     // The sandbox note follows what the host reported: shown in a mode that runs commands in the sandbox only
     // when the host says it cannot enforce one (this depends on the machine, so the check compares the two).
+    await waitFor("the host's sandbox report", () => evalWeb("/sandbox (un)?available/.test(d.getElementById('meta').textContent)"), 30000);
     const sb = await evalWeb("({ shown: !d.getElementById('sandboxNote').hidden, text: d.getElementById('sandboxNote').textContent.slice(0, 140), unavailable: /sandbox unavailable/.test(d.getElementById('meta').textContent) })");
     check("the sandbox note appears in Accept edits exactly when the host reports no sandbox", sb.shown === sb.unavailable && (!sb.shown || /fail before they start/.test(sb.text)), JSON.stringify(sb));
 
@@ -575,6 +602,11 @@ try {
   await shot("06-final");
 } catch (error) {
   check("e2e run", false, error.message);
+  try {
+    const state = await evalWebSafe("({ label: d.getElementById('modeLabel')?.textContent, footer: d.getElementById('meta')?.textContent.slice(0, 80), status: d.getElementById('stop')?.hidden, notices: [...d.querySelectorAll('.notice')].map(n => n.textContent.slice(0, 160)), dialogs: [] })");
+    console.log("FAILURE-STATE:", JSON.stringify(state));
+    await shot("99-failure");
+  } catch {}
 } finally {
   try {
     void browser?.send("Browser.close");

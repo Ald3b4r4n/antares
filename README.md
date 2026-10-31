@@ -124,6 +124,7 @@ src/muse/session.ts   one chat session over one host (turns, interrupt, approval
 src/muse/events.ts    maps raw MSP notifications to the events the UI shows
 src/muse/usage.ts     alert thresholds, token ledger, one-shot usage refresh
 src/muse/images.ts    image input validation and turn input parts
+src/muse/patches.ts   the host's file-edit patches: safe reading, rebuilding the before side
 src/muse/modes.ts     the permission modes and the Muse profile each one maps to
 src/muse/composer.ts  the + menu: skills, @mentions, canonical roots, plugin and connector rows
 src/muse/mcp.ts       connector list on a short-lived experimental host
