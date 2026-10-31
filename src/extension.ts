@@ -4,35 +4,39 @@ import { join } from "node:path";
 import * as vscode from "vscode";
 import { locateMuse } from "./muse/locate.ts";
 import { runSelfTest } from "./muse/selftest.ts";
-import { AntaresPanel } from "./ui/panel.ts";
+import { ChatPanel } from "./ui/chatPanel.ts";
 
 export function activate(context: vscode.ExtensionContext): void {
-  const open = (): AntaresPanel => AntaresPanel.show(context.extensionUri, () => void selfTest());
+  const output = vscode.window.createOutputChannel("Antares");
 
   const selfTest = async (): Promise<void> => {
-    const panel = open();
-    const configured = vscode.workspace.getConfiguration("antares").get<string>("musePath");
-    const binary = locateMuse(configured);
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
     if (!binary) {
-      panel.showResult(context.extensionUri, undefined, "Muse executable not found. Set antares.musePath in Settings.");
+      void vscode.window.showErrorMessage("Antares: Muse executable not found. Set antares.musePath in Settings.");
       return;
     }
-    panel.showResult(context.extensionUri, undefined, "Running offline self-test…");
     const workDir = mkdtempSync(join(tmpdir(), "antares-selftest-"));
     try {
       const version = (context.extension.packageJSON as { version?: string }).version;
-      panel.showResult(context.extensionUri, await runSelfTest(binary, workDir, version));
-    } catch (error) {
-      panel.showResult(context.extensionUri, undefined, `Self-test failed: ${error instanceof Error ? error.message : String(error)}`);
+      const result = await runSelfTest(binary, workDir, version);
+      output.appendLine(JSON.stringify(result, null, 2));
+      output.show(true);
+      const message = result.ok
+        ? `Antares self-test passed (Muse ${result.serverVersion}${result.fingerprintKnown ? "" : ", UNKNOWN schema fingerprint"}).`
+        : "Antares self-test failed. See the Antares output channel.";
+      void (result.ok ? vscode.window.showInformationMessage(message) : vscode.window.showErrorMessage(message));
     } finally {
       rmSync(workDir, { recursive: true, force: true });
     }
   };
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("antares.open", open),
+    output,
+    vscode.commands.registerCommand("antares.open", () => ChatPanel.show(context)),
     vscode.commands.registerCommand("antares.selfTest", selfTest),
   );
 }
 
-export function deactivate(): void {}
+export async function deactivate(): Promise<void> {
+  await ChatPanel.disposeCurrent();
+}

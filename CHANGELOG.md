@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — phase 1 (in progress)
+
+- Chat panel with streaming: assistant text arrives as it is generated; Stop interrupts the turn; New chat restarts the session.
+- Copy button (two-squares icon) on every message and on each code block, through the host clipboard.
+- Startup banner and logo at the top of the chat.
+- Footer with model, context use, last-turn tokens, and the 5 h / weekly subscription windows when the host reports them.
+- Safe mode (default on): shell and file-write tools disabled, `:read-only` profile. Setting `antares.safeMode`.
+- Event mapper for the observed MSP notifications; offline `smoke` test and a browser `preview` with a fake host.
+- `docs/PROTOCOL-NOTES.md`: observed vs. schema-only behavior, from one real minimal turn.
+
 ## 0.0.1 — phase 0 (spike)
 
 - MSP client over the stdio of `muse serve` (JSON-RPC 2.0, one object per line).

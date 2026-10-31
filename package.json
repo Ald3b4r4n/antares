@@ -6,9 +6,14 @@
   "publisher": "ald3b4r4n",
   "license": "MIT",
   "icon": "media/antares.png",
-  "repository": { "type": "git", "url": "https://github.com/Ald3b4r4n/antares.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ald3b4r4n/antares.git"
+  },
   "homepage": "https://github.com/Ald3b4r4n/antares",
-  "bugs": { "url": "https://github.com/Ald3b4r4n/antares/issues" },
+  "bugs": {
+    "url": "https://github.com/Ald3b4r4n/antares/issues"
+  },
   "private": true,
   "type": "module",
   "engines": {
@@ -45,6 +50,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Absolute path to the `muse` executable. Leave empty to auto-detect (PATH, then the default install location)."
+        },
+        "antares.safeMode": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start Muse with shell and file-write tools disabled and the `:read-only` profile. Approvals are not implemented yet, so turning this off lets the agent act without an approval prompt in Antares. Keep it on until the approvals phase lands."
         }
       }
     }
@@ -54,7 +64,9 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
     "spike": "node scripts/spike.ts",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "smoke": "node scripts/chat-smoke.ts",
+    "preview": "node scripts/preview.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
