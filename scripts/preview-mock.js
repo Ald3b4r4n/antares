@@ -35,6 +35,8 @@ let turnRunning = false;
 let nextTurnId;
 const queued = new Map(); // turnId -> the message the fake host is holding
 let folders = [];
+const connectorState = { figma: "loggedOut" };
+window.addEventListener("message", (ev) => { if (ev.data && ev.data.type === "__relist") window.acquireVsCodeApi().postMessage({ type: "listConnectors" }); });
 const decisions = new Map(); // approvalId -> resolve
 
 // Like the real host: "[Image #n]" markers are appended to the text and only metadata comes back.
@@ -214,7 +216,19 @@ window.acquireVsCodeApi = () => ({
       setTimeout(() => post({ type: "extras", kind: "connectors", rows: [
         { name: "github", source: "settings", transport: "streamableHttp", oauth: "loggedIn" },
         { name: "filesystem", source: "plugin", transport: "stdio", oauth: "notSupported" },
+        { name: "figma", source: "settings", transport: "streamableHttp", oauth: connectorState.figma },
       ] }), 200);
+    } else if (m.type === "connectorSignIn") {
+      post({ type: "extras", kind: "connectors", progress: "Waiting for you to finish signing in to " + m.server + " in the browser…", cancellable: true });
+      window.__signIn = setTimeout(() => { connectorState[m.server] = "loggedIn"; emit({ type: "notice", level: "info", text: "Signed in to " + m.server + "." }); window.postMessage({ type: "__relist" }, "*"); }, 1500);
+    } else if (m.type === "connectorCancel") {
+      clearTimeout(window.__signIn);
+      emit({ type: "notice", level: "info", text: "The sign-in was cancelled." });
+      window.postMessage({ type: "__relist" }, "*");
+    } else if (m.type === "connectorSignOut") {
+      connectorState[m.server] = "loggedOut";
+      emit({ type: "notice", level: "info", text: "Signed out of " + m.server + ". The provider's revocation: notAttempted." });
+      window.postMessage({ type: "__relist" }, "*");
     } else if (m.type === "listPlugins") {
       setTimeout(() => post({ type: "extras", kind: "plugins", rows: [{ id: "acme", version: "1.2.0", enabled: true, source: "marketplaceUserAdded" }] }), 200);
     }

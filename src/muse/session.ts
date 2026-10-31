@@ -368,6 +368,27 @@ export class MuseSession extends EventEmitter {
     return result;
   }
 
+  /**
+   * Installs a plugin (`plugin/install`): from a folder or from a configured marketplace. A plugin can bring hooks
+   * and MCP servers, which run code, so callers show what it brings and ask first. Antares never approves what a
+   * plugin brings; that is a separate step in Muse.
+   */
+  async installPlugin(target: { localPath: string } | { marketplace: string; name: string }): Promise<{ id: string; version: string; enabled: boolean; warning?: string }> {
+    await this.start();
+    if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
+    const wire = "localPath" in target ? { localPath: { path: target.localPath } } : { marketplace: { marketplace: target.marketplace, name: target.name } };
+    const r = await this.host.request<{ id?: unknown; version?: unknown; enabled?: unknown; warning?: unknown }>("plugin/install", { commandId: uuidv7(), sessionId: this.sessionId, target: wire }, 120_000);
+    return { id: String(r.id ?? ""), version: String(r.version ?? ""), enabled: r.enabled === true, warning: typeof r.warning === "string" && r.warning ? r.warning : undefined };
+  }
+
+  /** Adds a marketplace (`plugin/marketplaceAdd`): a catalog to install from. It installs nothing. */
+  async addMarketplace(name: string, source: string): Promise<{ name: string; pluginCount: number }> {
+    await this.start();
+    if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
+    const r = await this.host.request<{ name?: unknown; pluginCount?: unknown }>("plugin/marketplaceAdd", { commandId: uuidv7(), sessionId: this.sessionId, name, source }, 120_000);
+    return { name: String(r.name ?? name), pluginCount: typeof r.pluginCount === "number" ? r.pluginCount : 0 };
+  }
+
   async listPlugins(): Promise<PluginRow[]> {
     await this.start();
     if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");

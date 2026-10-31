@@ -46,6 +46,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
   <div class="overlay-head">
     <strong id="extrasTitle">Connectors</strong>
     <span class="grow"></span>
+    <span id="extrasActions" class="extras-actions"></span>
     <button id="extrasClose" class="link" aria-label="Close">Close</button>
   </div>
   <div id="extrasStatus" class="overlay-status"></div>

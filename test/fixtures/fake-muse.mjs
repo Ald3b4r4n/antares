@@ -125,6 +125,31 @@ rl.on("line", (line) => {
       rec("skill-import", msg.params);
       send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", source: msg.params.source, dryRun: msg.params.dryRun === true, installed: ["from-claude-a", "from-claude-b"], skipped: ["already-there"], quarantined: [{ id: "odd", reasons: ["bad frontmatter"] }], failed: [{ id: null, reason: "unreadable" }], counts: { installed: 2, quarantined: 1, skipped: 1, failed: 1 } } });
       break;
+    case "plugin/install":
+      rec("plugin-install", msg.params);
+      send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", id: msg.params.target.localPath ? "local-demo" : msg.params.target.marketplace.name, version: "1.0.0", enabled: true, source: msg.params.target.localPath ? "nativeLocal" : "marketplaceUserAdded", warning: "demo caveat" } });
+      break;
+    case "plugin/marketplaceAdd":
+      rec("marketplace-add", msg.params);
+      send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", name: msg.params.name, source: { kind: "local-dir", path: msg.params.source }, pluginCount: 2, skipped: [] } });
+      break;
+    case "mcpServer/list":
+      send({ id: msg.id, result: { servers: [{ name: "demo", source: "settings", transport: "streamableHttp", oauth: "loggedOut" }] } });
+      break;
+    case "mcpServer/oauthLogin":
+      rec("oauth-login", msg.params);
+      send({ id: msg.id, result: { authorizationUrl: process.env.FAKE_MUSE_AUTH_URL ?? "https://auth.example.test/authorize?state=secret-state" } });
+      if (process.env.FAKE_MUSE_OAUTH === "grant") setTimeout(() => send({ method: "mcpServer/oauthLoginCompleted", params: { server: msg.params.server, outcome: "granted" } }), 150);
+      if (process.env.FAKE_MUSE_OAUTH === "denied") setTimeout(() => send({ method: "mcpServer/oauthLoginCompleted", params: { server: msg.params.server, outcome: "denied", message: "The provider said no." } }), 150);
+      break;
+    case "mcpServer/oauthLoginCancel":
+      rec("oauth-cancel", msg.params);
+      send({ id: msg.id, result: { cancelled: true } });
+      break;
+    case "mcpServer/oauthLogout":
+      rec("oauth-logout", msg.params);
+      send({ id: msg.id, result: { removed: true, revocation: "notAttempted" } });
+      break;
     case "plugin/list":
       rec("plugin-list", msg.params);
       send({ id: msg.id, result: { plugins: [{ id: "acme", version: "1.2.0", enabled: true, source: "marketplaceUserAdded" }] } });

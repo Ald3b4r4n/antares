@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — phase 3A (plugins and OAuth)
+
+- **Plugins panel actions.** *Install from folder…* runs Muse's own `muse plugins validate` (read-only: it installs and executes nothing), then a dialog names the plugin, its version and description, the folder, and what it brings; hooks and MCP servers are called out as code that runs on this computer. *Install from marketplace…* lists what the configured marketplaces offer (`muse plugins list --available`), shows the source and says Antares cannot look inside before installing. *Add marketplace…* (name and source) says it installs nothing by itself. All three ask first; none approves what a plugin brings (that stays `muse plugins approve`).
+- **Connector sign-in and sign-out.** The connector list shows Sign in or Sign out for servers the host can resolve by name. Sign-in asks the host to start the flow, shows only the **https origin** of the provider page in a dialog, opens the browser after you agree, waits up to five minutes (with Cancel) and reports how it ended. Declining, cancelling or timing out cancels the flow at the host. Sign-out deletes Muse's stored credential and asks the provider to revoke it (best effort). Antares never sees a token.
+- Findings and probes: `scripts/probe-plugins.mjs` and `scripts/probe-plugins-msp.ts` (throwaway home); see the protocol notes.
+- Tests: 152 unit tests (12 new, against the fake host); a new isolated real-window flow, `E2E_PLUGINS=1` (15 checks, plugins that only bring a skill), plus all earlier flows on both editors.
+- Not verified: OAuth against a real provider (the test machine has no connector), and installing a plugin that brings hooks or MCP servers.
+
 ## Unreleased — phase 3A (first slice): import skills
 
 - "Import skills…" in the "+" menu: choose Claude or Codex, see the host's own preview (`skill/import` with `dryRun`, which writes nothing), confirm in a dialog that lists the skills and says to read what you import, then the host imports them and the slash palette refreshes. Running it again reports what is already imported. Skill activation is not offered: it can be written but not read back (see the protocol notes).

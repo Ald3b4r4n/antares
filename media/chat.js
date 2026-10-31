@@ -1145,6 +1145,19 @@
     extrasTitle.textContent = kind === "connectors" ? "Connectors (MCP servers)" : "Plugins";
     extrasStatus.textContent = "Reading from Muse…";
     extrasList.replaceChildren();
+    const actions = $("extrasActions");
+    actions.replaceChildren();
+    if (kind === "plugins") {
+      const add = (label, title, message) => {
+        const b = el("button", "link tiny", label);
+        b.title = title;
+        b.addEventListener("click", () => vscode.postMessage(message));
+        actions.append(b);
+      };
+      add("Install from folder…", "Check a plugin folder with Muse, see what it brings, then install it", { type: "installPlugin", from: "folder" });
+      add("Install from marketplace…", "Pick a plugin a configured marketplace offers", { type: "installPlugin", from: "marketplace" });
+      add("Add marketplace…", "Add a catalog to install from (installs nothing by itself)", { type: "addMarketplace" });
+    }
     vscode.postMessage({ type: kind === "connectors" ? "listConnectors" : "listPlugins" });
   }
   function closeExtras() {
@@ -1152,6 +1165,17 @@
   }
   function onExtras(msg) {
     if (extrasPanel.hidden || extrasPanel.dataset.kind !== msg.kind) return;
+    if (msg.progress) {
+      // A sign-in is under way: say so (the list stays), with a way to stop waiting.
+      extrasStatus.textContent = msg.progress + " ";
+      if (msg.cancellable) {
+        const stop = el("button", "link tiny", "Cancel");
+        stop.addEventListener("click", () => vscode.postMessage({ type: "connectorCancel" }));
+        extrasStatus.append(stop);
+      }
+      for (const b of extrasList.querySelectorAll("button")) b.disabled = true;
+      return;
+    }
     extrasList.replaceChildren();
     if (msg.error) {
       extrasStatus.textContent = "Could not read the list: " + msg.error;
@@ -1159,9 +1183,12 @@
     }
     const rows = msg.rows || [];
     const noun = msg.kind === "connectors" ? "connector" : "plugin";
+    const how = msg.kind === "connectors"
+      ? "Sign in and out here; Muse runs the sign-in and keeps the credential. Adding or removing a connector is done in Muse's own configuration."
+      : "Installing runs nothing by itself, but a plugin can bring hooks and servers that do: you see what it brings first.";
     extrasStatus.textContent = rows.length
-      ? rows.length + " " + noun + (rows.length === 1 ? "" : "s") + ". This is a read-only list; adding, logging in and removing come in a later phase."
-      : "No " + noun + "s are set up in Muse. This is a read-only list; managing them comes in a later phase.";
+      ? rows.length + " " + noun + (rows.length === 1 ? "" : "s") + ". " + how
+      : "No " + noun + "s are set up in Muse. " + how;
     for (const r of rows) {
       const li = el("li", "session extra-row");
       const info = el("div", "session-info");
@@ -1170,6 +1197,13 @@
       if (msg.kind === "connectors") {
         info.append(el("div", "session-meta", "from " + r.source));
         badges.append(el("span", "badge", r.transport), el("span", "badge", r.oauth === "loggedIn" ? "signed in" : r.oauth === "loggedOut" ? "signed out" : "no sign-in"));
+        // Only servers the host can resolve by name (settings or a plugin) can be signed in or out.
+        if (r.source !== "session" && (r.oauth === "loggedOut" || r.oauth === "loggedIn")) {
+          const out = r.oauth === "loggedIn";
+          const b = el("button", "link tiny", out ? "Sign out" : "Sign in");
+          b.addEventListener("click", () => vscode.postMessage({ type: out ? "connectorSignOut" : "connectorSignIn", server: r.name }));
+          badges.append(b);
+        }
       } else {
         info.append(el("div", "session-meta", "version " + (r.version || "unknown") + " · " + r.source));
         badges.append(el("span", "badge", r.enabled ? "enabled" : "disabled"));

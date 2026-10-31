@@ -9,6 +9,8 @@ import { countChanges, normalizeHostPath, readPatch, relativeToRoots, reversePat
 import type { OriginalProvider } from "./originalProvider.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
 import { listMcpServers } from "../muse/mcp.ts";
+import { httpsOrigin, oauthSignIn, oauthSignOut } from "../muse/mcpLogin.ts";
+import { describeCapabilities, listAvailablePlugins, validatePlugin } from "../muse/pluginCli.ts";
 import { locateMuse } from "../muse/locate.ts";
 import { MuseSession, READ_ONLY } from "../muse/session.ts";
 import { chatHtml } from "./chatHtml.ts";
@@ -25,6 +27,11 @@ type FromWebview =
   | { type: "listConnectors" }
   | { type: "listPlugins" }
   | { type: "importSkills" }
+  | { type: "installPlugin"; from: "folder" | "marketplace" }
+  | { type: "addMarketplace" }
+  | { type: "connectorSignIn"; server: string }
+  | { type: "connectorSignOut"; server: string }
+  | { type: "connectorCancel" }
   | { type: "unqueue"; turnId: string }
   | { type: "openFile"; itemId: string; path: string }
   | { type: "openDiff"; itemId: string; path: string }
@@ -60,6 +67,8 @@ export class ChatPanel {
   static originals: OriginalProvider | undefined;
   /** The host's patch for each file tool call shown in this chat, by item id (read by this class, never by the page). */
   private readonly patches = new Map<string, PatchFile[]>();
+  /** Set while a connector sign-in waits for the browser; aborting it cancels the flow at the host. */
+  private loginAbort: AbortController | undefined;
   /** Whether this chat has any conversation yet (a turn ran here, or a stored session was replayed). */
   private hasConversation = false;
   private readonly panel: vscode.WebviewPanel;
@@ -217,6 +226,21 @@ export class ChatPanel {
         break;
       case "importSkills":
         await this.importSkills();
+        break;
+      case "installPlugin":
+        await (message.from === "folder" ? this.installPluginFromFolder() : this.installPluginFromMarketplace());
+        break;
+      case "addMarketplace":
+        await this.addMarketplace();
+        break;
+      case "connectorSignIn":
+        await this.connectorSignIn(message.server);
+        break;
+      case "connectorSignOut":
+        await this.connectorSignOut(message.server);
+        break;
+      case "connectorCancel":
+        this.loginAbort?.abort();
         break;
       case "unqueue":
         await this.unqueue(message.turnId);
@@ -715,6 +739,104 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     }
   }
 
+  // ---- plugins: install and marketplaces (each step shows what it does and asks first) ----
+
+  private museBinary(): string | undefined {
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
+    if (!binary) this.notice("error", "Muse executable not found. Install Muse Code or set antares.musePath in Settings.");
+    return binary;
+  }
+
+  private static readonly CODE_WARNING = "Hooks and MCP servers are programs that run on this computer. Install only plugins you trust. Antares never approves what a plugin brings; review it in a terminal with muse plugins inspect before you rely on it.";
+
+  /** Refreshes the plugin list the page shows, when it is open. */
+  private async refreshPluginList(session: MuseSession): Promise<void> {
+    this.post({ type: "extras", kind: "plugins", rows: await session.listPlugins().catch(() => []) });
+  }
+
+  /** Install from a folder: Muse's own read-only validation first (it installs and executes nothing), then the dialog. */
+  private async installPluginFromFolder(): Promise<void> {
+    const binary = this.museBinary();
+    const session = binary ? (this.ensureSession(true) ?? this.ensureSession(false)) : undefined;
+    if (!binary || !session) return;
+    const dev = this.devPicks();
+    const picked = dev.length > 0 ? vscode.Uri.file(dev[0]!) : (await vscode.window.showOpenDialog({ canSelectMany: false, canSelectFiles: false, canSelectFolders: true, openLabel: "Check this plugin", title: "Choose a plugin folder" }))?.[0];
+    if (!picked) return;
+    try {
+      const preview = await validatePlugin(binary, picked.fsPath);
+      if (!preview.valid || !preview.id) {
+        this.notice("warning", `That folder is not an installable plugin: ${preview.diagnostics[0] ?? "Muse could not read it."}`);
+        return;
+      }
+      const choice = await vscode.window.showWarningMessage(
+        `Install plugin ${preview.id}${preview.version ? ` ${preview.version}` : ""}?`,
+        { modal: true, detail: `${preview.description ?? ""}${preview.description ? "\n\n" : ""}From the folder ${picked.fsPath}\n${describeCapabilities(preview)}${preview.diagnostics.length ? `\n\nMuse noted: ${preview.diagnostics.slice(0, 3).join("; ")}` : ""}\n\n${ChatPanel.CODE_WARNING}` },
+        "Install",
+      );
+      if (choice !== "Install") return;
+      const done = await session.installPlugin({ localPath: picked.fsPath });
+      this.notice("info", `Installed ${done.id} ${done.version} (${done.enabled ? "enabled" : "disabled"}). Its skills and commands appear in new chats.${done.warning ? ` Muse says: ${done.warning}` : ""}`);
+      await this.refreshPluginList(session);
+    } catch (error) {
+      this.notice("error", `Could not install the plugin: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Install from a marketplace already configured in Muse: pick from what it offers, see where it comes from, confirm. */
+  private async installPluginFromMarketplace(): Promise<void> {
+    const binary = this.museBinary();
+    const session = binary ? (this.ensureSession(true) ?? this.ensureSession(false)) : undefined;
+    if (!binary || !session) return;
+    try {
+      const available = await listAvailablePlugins(binary);
+      if (available.length === 0) {
+        this.notice("info", "No marketplace offers a plugin yet. Use Add marketplace first.");
+        return;
+      }
+      const dev = this.devPicks();
+      let chosen = dev.length > 0 ? available.find((p) => `${p.name}@${p.marketplace}` === dev[0]) : undefined;
+      if (!chosen && dev.length === 0) {
+        const item = await vscode.window.showQuickPick(available.map((p) => ({ label: p.name, description: `${p.version ?? ""} · from ${p.marketplace}`.trim(), detail: p.source, plugin: p })), { title: "Install a plugin from a marketplace", placeHolder: "Pick a plugin" });
+        chosen = item?.plugin;
+      }
+      if (!chosen) return;
+      const choice = await vscode.window.showWarningMessage(
+        `Install plugin ${chosen.name}${chosen.version ? ` ${chosen.version}` : ""} from ${chosen.marketplace}?`,
+        { modal: true, detail: `Source: ${chosen.source ?? "the marketplace's snapshot"}\n\nAntares cannot look inside a marketplace plugin before it is installed.\n\n${ChatPanel.CODE_WARNING}` },
+        "Install",
+      );
+      if (choice !== "Install") return;
+      const done = await session.installPlugin({ marketplace: chosen.marketplace, name: chosen.name });
+      this.notice("info", `Installed ${done.id} ${done.version} (${done.enabled ? "enabled" : "disabled"}). Its skills and commands appear in new chats.${done.warning ? ` Muse says: ${done.warning}` : ""}`);
+      await this.refreshPluginList(session);
+    } catch (error) {
+      this.notice("error", `Could not install the plugin: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Add a marketplace: a catalog (a folder or a Git repository). It installs nothing by itself. */
+  private async addMarketplace(): Promise<void> {
+    const session = this.ensureSession(true) ?? this.ensureSession(false);
+    if (!session) return;
+    const dev = this.devPicks();
+    const name = dev.length >= 2 ? dev[0] : await vscode.window.showInputBox({ title: "Add a marketplace", prompt: "A short name for it", validateInput: (v) => (/^[A-Za-z0-9._-]+$/.test(v) ? undefined : "Use letters, digits, dot, dash or underscore") });
+    if (!name) return;
+    const source = dev.length >= 2 ? dev[1] : await vscode.window.showInputBox({ title: `Add marketplace ${name}`, prompt: "A local folder, owner/repo, or a Git URL" });
+    if (!source) return;
+    const choice = await vscode.window.showWarningMessage(
+      `Add marketplace ${name}?`,
+      { modal: true, detail: `Source: ${source}\n\nThis adds a catalog to Muse. It installs no plugin by itself. For a Git source, Muse downloads the repository to read its list.` },
+      "Add marketplace",
+    );
+    if (choice !== "Add marketplace") return;
+    try {
+      const done = await session.addMarketplace(name, source);
+      this.notice("info", `Added marketplace ${done.name}: ${done.pluginCount} plugin${done.pluginCount === 1 ? "" : "s"} offered. Nothing was installed.`);
+    } catch (error) {
+      this.notice("error", `Could not add the marketplace: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private async listPlugins(): Promise<void> {
     const session = this.ensureSession(true) ?? this.ensureSession(false);
     if (!session) return;
@@ -723,6 +845,70 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     } catch (error) {
       this.post({ type: "extras", kind: "plugins", rows: [], error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  // ---- connectors: OAuth sign-in and sign-out, run by the host; Antares never sees a credential ----
+
+  private mcpOptions() {
+    const binary = this.museBinary();
+    const cwd = this.workspaceFolder();
+    if (!binary || !cwd) {
+      if (binary) this.notice("error", "Open a folder first.");
+      return undefined;
+    }
+    return { binary, cwd, clientVersion: (this.context.extension.packageJSON as { version?: string }).version };
+  }
+
+  private async connectorSignIn(server: string): Promise<void> {
+    const options = this.mcpOptions();
+    if (!options || typeof server !== "string" || this.loginAbort) return;
+    const abort = new AbortController();
+    this.loginAbort = abort;
+    this.post({ type: "extras", kind: "connectors", progress: `Starting the sign-in to ${server}…` });
+    try {
+      const result = await oauthSignIn({ ...options, signal: abort.signal }, server, async (url) => {
+        const origin = httpsOrigin(url);
+        if (!origin) {
+          this.notice("error", `Muse returned a sign-in address that is not https, so Antares did not open it.`);
+          return false;
+        }
+        const choice = await vscode.window.showWarningMessage(
+          `Sign in to ${server}?`,
+          { modal: true, detail: `Your browser will open ${origin}, the provider's sign-in page for this connector. Muse runs the sign-in and keeps the credential; Antares never sees it. Only continue if you expect this page.` },
+          "Open the sign-in page",
+        );
+        if (choice !== "Open the sign-in page") return false;
+        await vscode.env.openExternal(vscode.Uri.parse(url));
+        this.post({ type: "extras", kind: "connectors", progress: `Waiting for you to finish signing in to ${server} in the browser…`, cancellable: true });
+        return true;
+      });
+      if (result.outcome === "granted") this.notice("info", `Signed in to ${server}.`);
+      else if (result.outcome === "cancelled") this.notice("info", `The sign-in to ${server} was cancelled.`);
+      else this.notice("warning", `The sign-in to ${server} did not finish (${result.outcome})${result.message ? `: ${result.message}` : ""}.`);
+    } catch (error) {
+      this.notice("error", `Could not sign in: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      this.loginAbort = undefined;
+      await this.listConnectors();
+    }
+  }
+
+  private async connectorSignOut(server: string): Promise<void> {
+    const options = this.mcpOptions();
+    if (!options || typeof server !== "string") return;
+    const choice = await vscode.window.showWarningMessage(
+      `Sign out of ${server}?`,
+      { modal: true, detail: "Muse deletes its stored credential for this connector, and asks the provider to revoke it (best effort). The connector will need a new sign-in to work." },
+      "Sign out",
+    );
+    if (choice !== "Sign out") return;
+    try {
+      const result = await oauthSignOut(options, server);
+      this.notice("info", result.removed ? `Signed out of ${server}. The provider's revocation: ${result.revocation}.` : `There was no stored credential for ${server}.`);
+    } catch (error) {
+      this.notice("error", `Could not sign out: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.listConnectors();
   }
 
   private async listConnectors(): Promise<void> {

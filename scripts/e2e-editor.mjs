@@ -18,6 +18,9 @@ const MODES = process.env.E2E_MODES === "1";
 // E2E_IMPORT=1: the real host with no model call, in a throwaway HOME that holds one fake Claude skill, so the
 // "Import skills" flow (source, preview, confirmation, real import, nothing left to import) touches only that.
 const IMPORT = process.env.E2E_IMPORT === "1";
+// E2E_PLUGINS=1: the real host with no model call, in a throwaway HOME. Two demo plugins that only bring a skill
+// (no hooks, no MCP servers, so nothing runs) and a local marketplace; checks the install and marketplace dialogs.
+const PLUGINS = process.env.E2E_PLUGINS === "1";
 // Voice mode: fake (no microphone, no engine), error (engine not set up: the setup offer), real (the real
 // microphone and the real faster-whisper from ANTARES_VOICE_HOME; records about 2.5 s and keeps nothing).
 const VOICE = process.env.E2E_VOICE ?? "fake";
@@ -47,7 +50,7 @@ const patchFile = join(work, "tool-outputs", "t1", "call_1-tool_patch.json");
 mkdirSync(join(work, "tool-outputs", "t1"), { recursive: true });
 writeFileSync(join(workspace, "plan.txt"), "alpha\nBETA\ngamma\n");
 writeFileSync(patchFile, JSON.stringify({ files: [{ path: join(workspace, "plan.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] }));
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 const fakeHome = join(work, "home");
 mkdirSync(join(fakeHome, ".claude", "skills", "demo-import"), { recursive: true });
@@ -56,7 +59,7 @@ writeFileSync(join(fakeHome, ".claude", "skills", "demo-import", "SKILL.md"), "-
 const child = spawn(
   exe,
   [workspace, `--user-data-dir=${userData}`, `--extensions-dir=${join(work, "extensions")}`, `--extensionDevelopmentPath=${root}`, `--remote-debugging-port=${port}`, "--disable-workspace-trust", "--skip-release-notes", "--skip-welcome", "--new-window"],
-  { stdio: "ignore", env: REAL ? { ...process.env } : { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), ...(IMPORT ? { HOME: fakeHome, USERPROFILE: fakeHome } : {}), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" } },
+  { stdio: "ignore", env: REAL ? { ...process.env } : { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), ...(IMPORT || PLUGINS ? { HOME: fakeHome, USERPROFILE: fakeHome } : {}), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" } },
 );
 child.on("error", (e) => console.error("launch error:", e.message));
 
@@ -237,7 +240,7 @@ try {
   check("model and effort controls exist", dom.modelControls);
   check("page styles loaded", dom.cssLoaded);
 
-  if (!MODES && !REAL && !IMPORT) {
+  if (!MODES && !REAL && !IMPORT && !PLUGINS) {
     // Tool presentation: a checklist instead of JSON, and a file edit as a diff with buttons to open VS Code's diff.
     await waitFor("the demo tool cards", () => evalWeb("d.querySelectorAll('.tool').length >= 2 && d.querySelectorAll('.patch-line').length > 0"), 20000);
     const cards = await evalWeb("({ todos: [...d.querySelectorAll('.todo')].map(x => x.className.replace('todo ', '') + ':' + x.querySelector('.todo-text').textContent), todoSummary: d.querySelector('.tool .tool-summary').textContent, edit: { summary: [...d.querySelectorAll('.tool-summary')].pop().textContent, changed: d.querySelector('.patch-head .tool-changed')?.textContent, lines: [...d.querySelectorAll('.patch-line')].map(x => x.className.replace('patch-line ', '') + ':' + x.textContent), buttons: [...d.querySelectorAll('.patch-head button')].map(b => b.textContent) } })");
@@ -255,7 +258,78 @@ try {
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
   }
 
-  if (IMPORT) {
+  if (PLUGINS) {
+    const settingsFile = join(workspace, ".vscode", "settings.json");
+    const setPicks = async (paths) => {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, "utf8")), "antares.dev.picks": paths }, null, 2));
+      await sleep(2500);
+    };
+    const makePlugin = (root, name) => {
+      mkdirSync(join(root, ".claude-plugin"), { recursive: true });
+      mkdirSync(join(root, "skills", "hello"), { recursive: true });
+      writeFileSync(join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name, version: "0.0.1", description: "A harmless demo bundle that only brings a skill." }));
+      writeFileSync(join(root, "skills", "hello", "SKILL.md"), "---\nname: hello\ndescription: Says hello. Demo only.\n---\nSay hello.\n");
+    };
+    const folderPlugin = join(work, "plugin-folder");
+    makePlugin(folderPlugin, "antares-folder-demo");
+    const market = join(work, "market");
+    makePlugin(join(market, "plugins", "antares-market-demo"), "antares-market-demo");
+    mkdirSync(join(market, ".claude-plugin"), { recursive: true });
+    writeFileSync(join(market, ".claude-plugin", "marketplace.json"), JSON.stringify({ name: "demo-market", owner: { name: "Antares e2e" }, plugins: [{ name: "antares-market-demo", source: "./plugins/antares-market-demo", description: "Demo." }] }));
+    const emptyDir = join(work, "not-a-plugin");
+    mkdirSync(emptyDir, { recursive: true });
+
+    const dialogNow = () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 900), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()");
+    const clickDialog = (label) => evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === " + JSON.stringify(label) + "); btn.click(); return true; })()");
+    const notices = () => evalWeb("[...d.querySelectorAll('.notice')].map(n => n.textContent.slice(0, 200))");
+    const act = (label) => evalWeb("(() => { [...d.querySelectorAll('#extrasActions button')].find(b => b.textContent === " + JSON.stringify(label) + ").click(); return true; })()");
+
+    await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=plugins]').click(); return true; })()");
+    await waitFor("the plugin list", () => evalWeb("!d.getElementById('extrasPanel').hidden && d.getElementById('extrasStatus').textContent !== 'Reading from Muse…'"), 60000);
+    const buttons = await evalWeb("[...d.querySelectorAll('#extrasActions button')].map(b => b.textContent)");
+    check("the plugin list offers install from a folder, install from a marketplace and add marketplace", JSON.stringify(buttons) === JSON.stringify(["Install from folder\u2026", "Install from marketplace\u2026", "Add marketplace\u2026"]), JSON.stringify(buttons));
+
+    // An empty folder is refused by Muse's own validation, with the reason.
+    await setPicks([emptyDir]);
+    await act("Install from folder\u2026");
+    await waitFor("the refusal", async () => (await notices()).some((n) => /not an installable plugin/.test(n)), 60000);
+    check("a folder that is not a plugin is refused with Muse's reason, no dialog", (await notices()).some((n) => /not an installable plugin: error: plugin root must contain/.test(n)) && (await dialogNow()) === null, JSON.stringify(await notices()));
+
+    // A valid folder: the dialog says what it brings and warns about code; cancelling installs nothing.
+    await setPicks([folderPlugin]);
+    await act("Install from folder\u2026");
+    const ask = await waitFor("the install dialog", dialogNow, 60000);
+    check("the install dialog names the plugin, what it brings, the source and the code warning", /Install plugin antares-folder-demo 0\.0\.1\?/.test(ask.text) && /Brings: 1 skill\./.test(ask.text) && /plugin-folder/.test(ask.text) && /never approves what a plugin brings/.test(ask.text) && ask.buttons.includes("Install"), JSON.stringify(ask));
+    await shot("30-plugin-install-dialog");
+    await clickDialog("Cancel");
+    await sleep(800);
+    check("cancelling installs nothing", !(await notices()).some((n) => /Installed antares-folder-demo/.test(n)));
+    await act("Install from folder\u2026");
+    await waitFor("the dialog again", dialogNow, 60000);
+    await clickDialog("Install");
+    await waitFor("the install result", async () => (await notices()).some((n) => /Installed antares-folder-demo 0\.0\.1/.test(n)), 90000);
+    await waitFor("the list to show it", () => evalWeb("[...d.querySelectorAll('#extrasList .session-title')].some(x => x.textContent === 'antares-folder-demo')"), 30000);
+    check("confirming installs the plugin and the list shows it", true);
+
+    // A marketplace: adding it installs nothing; then a plugin from it is installed after its own dialog.
+    await setPicks(["demo-market", market]);
+    await act("Add marketplace\u2026");
+    const addAsk = await waitFor("the marketplace dialog", dialogNow, 30000);
+    check("adding a marketplace says it installs nothing by itself", /Add marketplace demo-market\?/.test(addAsk.text) && /installs no plugin by itself/.test(addAsk.text), JSON.stringify(addAsk.text.slice(0, 200)));
+    await clickDialog("Add marketplace");
+    await waitFor("the marketplace result", async () => (await notices()).some((n) => /Added marketplace demo-market: 1 plugin offered\. Nothing was installed\./.test(n)), 90000);
+    check("the marketplace was added and nothing was installed", true);
+
+    await setPicks(["antares-market-demo@demo-market"]);
+    await act("Install from marketplace\u2026");
+    const mAsk = await waitFor("the marketplace install dialog", dialogNow, 60000);
+    check("a marketplace plugin's dialog names where it comes from and admits it cannot look inside", /Install plugin antares-market-demo 0\.0\.1 from demo-market\?/.test(mAsk.text) && /cannot look inside a marketplace plugin/.test(mAsk.text), JSON.stringify(mAsk.text.slice(0, 260)));
+    await clickDialog("Install");
+    await waitFor("the marketplace install result", async () => (await notices()).some((n) => /Installed antares-market-demo 0\.0\.1/.test(n)), 90000);
+    check("the marketplace plugin was installed", true);
+    await waitFor("both plugins in the list", () => evalWeb("[...d.querySelectorAll('#extrasList .session-title')].length === 2"), 30000);
+    await shot("31-plugins-installed");
+  } else if (IMPORT) {
     const dialogNow = () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 600), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()");
     const clickDialog = (label) => evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === " + JSON.stringify(label) + "); btn.click(); return true; })()");
     const startImport = () => evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=importSkills]').click(); return true; })()");
@@ -607,7 +681,7 @@ try {
       await evalWeb(`(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=${act}]').click(); return true; })()`);
       await waitFor(`the ${act} list`, () => evalWeb("!d.getElementById('extrasPanel').hidden && d.getElementById('extrasStatus').textContent !== 'Reading from Muse…'"), 30000);
       const extras = await evalWeb("({ title: d.getElementById('extrasTitle').textContent, status: d.getElementById('extrasStatus').textContent, rows: d.querySelectorAll('#extrasList li').length })");
-      check(`the ${act} list answers from the real host (rows or a clear empty state), read-only`, title.test(extras.title) && !/^Could not/.test(extras.status) && /read-only/.test(extras.status), JSON.stringify(extras));
+      check(`the ${act} list answers from the real host (rows or a clear empty state)`, title.test(extras.title) && !/^Could not/.test(extras.status) && /(Sign in and out here|Installing runs nothing)/.test(extras.status), JSON.stringify(extras));
       await shot(`21-${act}`);
       await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
     }

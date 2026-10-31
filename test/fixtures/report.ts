@@ -22,11 +22,14 @@ export interface FakeReport {
   pluginLists: Record<string, unknown>[];
   unqueues: Record<string, unknown>[];
   skillImports: Record<string, unknown>[];
+  pluginInstalls: Record<string, unknown>[];
+  marketplaceAdds: Record<string, unknown>[];
+  oauth: { kind: string; data: Record<string, unknown> }[];
 }
 
 /** Reads the report. A missing file or a half-written last line is "not yet": callers poll. */
 export function readReport(path: string): FakeReport {
-  const report: FakeReport = { argv: [], startAttempts: [], startParams: {}, receipts: [], decides: [], interrupts: 0, setModels: [], turnStarts: [], listParams: [], initializes: [], refreshes: 0, sessionLists: [], resumes: [], forks: [], skillLists: [], pluginLists: [], unqueues: [], skillImports: [] };
+  const report: FakeReport = { argv: [], startAttempts: [], startParams: {}, receipts: [], decides: [], interrupts: 0, setModels: [], turnStarts: [], listParams: [], initializes: [], refreshes: 0, sessionLists: [], resumes: [], forks: [], skillLists: [], pluginLists: [], unqueues: [], skillImports: [], pluginInstalls: [], marketplaceAdds: [], oauth: [] };
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -90,6 +93,17 @@ export function readReport(path: string): FakeReport {
         break;
       case "plugin-list":
         report.pluginLists.push(data as Record<string, unknown>);
+        break;
+      case "oauth-login":
+      case "oauth-cancel":
+      case "oauth-logout":
+        report.oauth.push({ kind: entry.kind, data: data as Record<string, unknown> });
+        break;
+      case "plugin-install":
+        report.pluginInstalls.push(data as Record<string, unknown>);
+        break;
+      case "marketplace-add":
+        report.marketplaceAdds.push(data as Record<string, unknown>);
         break;
       case "skill-import":
         report.skillImports.push(data as Record<string, unknown>);
