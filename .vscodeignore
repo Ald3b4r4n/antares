@@ -9,3 +9,6 @@ esbuild.mjs
 spike-output/**
 .git/**
 *.vsix
+test/**
+dist-test/**
+esbuild.test.mjs

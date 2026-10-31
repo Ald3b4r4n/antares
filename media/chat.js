@@ -189,6 +189,13 @@
         state.background.clear();
         setRunning(false, "Ready");
         input.focus();
+        vscode.postMessage({
+          type: "rendered",
+          messages: messages.querySelectorAll(".msg").length,
+          userMessages: messages.querySelectorAll(".msg.user").length,
+          codeBlocks: messages.querySelectorAll(".code").length,
+          copyButtons: messages.querySelectorAll("button.copy").length,
+        });
         break;
       }
       case "tokens":

@@ -10,7 +10,15 @@ type FromWebview =
   | { type: "send"; text: string }
   | { type: "stop" }
   | { type: "newChat" }
-  | { type: "copy"; text: string };
+  | { type: "copy"; text: string }
+  | { type: "rendered"; messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
+
+/** Recorded only when ANTARES_TEST=1, so integration tests can observe the real webview. */
+export interface TestState {
+  ready: number;
+  events: ChatEvent[];
+  rendered?: { messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
+}
 
 /** The Antares chat panel: one webview, one Muse session at a time. */
 export class ChatPanel {
@@ -18,6 +26,11 @@ export class ChatPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
   private session?: MuseSession;
+  readonly testState: TestState = { ready: 0, events: [] };
+
+  static get(): ChatPanel | undefined {
+    return ChatPanel.current;
+  }
 
   static show(context: vscode.ExtensionContext): ChatPanel {
     if (ChatPanel.current) {
@@ -55,6 +68,7 @@ export class ChatPanel {
   }
 
   private post(message: object): void {
+    if (process.env.ANTARES_TEST === "1" && "event" in message) this.testState.events.push((message as { event: ChatEvent }).event);
     void this.panel.webview.postMessage(message);
   }
 
@@ -62,7 +76,8 @@ export class ChatPanel {
     this.post({ type: "event", event: { type: "notice", level, text } satisfies ChatEvent });
   }
 
-  private async onMessage(message: FromWebview): Promise<void> {
+  /** Public for tests and for the webview bridge. */
+  async onMessage(message: FromWebview): Promise<void> {
     switch (message.type) {
       case "copy":
         await vscode.env.clipboard.writeText(message.text);
@@ -80,6 +95,10 @@ export class ChatPanel {
         this.post({ type: "reset" });
         break;
       case "ready":
+        this.testState.ready++;
+        break;
+      case "rendered":
+        this.testState.rendered = { messages: message.messages, userMessages: message.userMessages, codeBlocks: message.codeBlocks, copyButtons: message.copyButtons };
         break;
     }
   }
@@ -102,6 +121,7 @@ export class ChatPanel {
       binary,
       workspaceRoot: folder.uri.fsPath,
       safeMode: config.get<boolean>("safeMode", true),
+      provider: config.get<string>("dev.provider") || undefined,
       clientVersion: version,
     });
     session.on("event", (event: ChatEvent) => this.post({ type: "event", event }));
@@ -115,7 +135,7 @@ export class ChatPanel {
     return session;
   }
 
-  private async send(text: string): Promise<void> {
+  async send(text: string): Promise<void> {
     const session = this.ensureSession();
     if (!session) return;
     try {

@@ -6,7 +6,11 @@ import { locateMuse } from "./muse/locate.ts";
 import { runSelfTest } from "./muse/selftest.ts";
 import { ChatPanel } from "./ui/chatPanel.ts";
 
-export function activate(context: vscode.ExtensionContext): void {
+export interface AntaresApi {
+  chat(): ChatPanel | undefined;
+}
+
+export function activate(context: vscode.ExtensionContext): AntaresApi {
   const output = vscode.window.createOutputChannel("Antares");
 
   const selfTest = async (): Promise<void> => {
@@ -35,6 +39,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("antares.open", () => ChatPanel.show(context)),
     vscode.commands.registerCommand("antares.selfTest", selfTest),
   );
+  return { chat: () => ChatPanel.get() };
 }
 
 export async function deactivate(): Promise<void> {

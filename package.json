@@ -55,6 +55,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Start Muse with shell and file-write tools disabled and the `:read-only` profile. Approvals are not implemented yet, so turning this off lets the agent act without an approval prompt in Antares. Keep it on until the approvals phase lands."
+        },
+        "antares.dev.provider": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Development only: Muse provider id (e.g. `echo`) for offline testing. Leave empty for normal use."
         }
       }
     }
@@ -66,11 +71,13 @@
     "spike": "node scripts/spike.ts",
     "package": "vsce package --no-dependencies",
     "smoke": "node scripts/chat-smoke.ts",
-    "preview": "node scripts/preview.ts"
+    "preview": "node scripts/preview.ts",
+    "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.8.0"

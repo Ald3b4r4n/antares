@@ -5,3 +5,4 @@ dist/
 spike-output/
 .env
 *.log
+dist-test/

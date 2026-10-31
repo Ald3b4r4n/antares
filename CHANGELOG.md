@@ -8,6 +8,8 @@
 - Footer with model, context use, last-turn tokens, and the 5 h / weekly subscription windows when the host reports them.
 - Safe mode (default on): shell and file-write tools disabled, `:read-only` profile. Setting `antares.safeMode`.
 - Event mapper for the observed MSP notifications; offline `smoke` test and a browser `preview` with a fake host.
+- Integration suite (`npm run test:editor`) that runs inside a real editor; passing on VS Code 1.143.1 and Antigravity IDE 1.107.0.
+- Setting `antares.dev.provider` for offline development, and a small test API returned by `activate`.
 - `docs/PROTOCOL-NOTES.md`: observed vs. schema-only behavior, from one real minimal turn.
 
 ## 0.0.1 — phase 0 (spike)

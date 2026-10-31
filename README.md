@@ -47,7 +47,7 @@ Known limits worth stating up front:
 ## Requirements
 
 - Muse Code installed and, for later phases, logged in. Phase 0 needs no login.
-- VS Code 1.90+ or a compatible fork. The protocol layer and the chat core are tested headless on Windows against Muse 1.4.14, and the chat page is exercised in a browser with a fake host. It has **not** yet been run inside the VS Code or Antigravity GUI.
+- VS Code 1.90+ or a compatible fork. Integration-tested inside **VS Code 1.143.1** and **Antigravity IDE 1.107.0** (see [Testing](#testing)). The protocol layer and the chat core are also tested headless on Windows against Muse 1.4.14.
 - Node.js 22+ to build from source.
 
 ## Try it (from source)
@@ -73,6 +73,14 @@ To run inside the editor, open this folder in VS Code and press `F5`, then run *
 
 To install in Antigravity or another fork, build a VSIX with `npm run package` and install it with *Extensions: Install from VSIX…*.
 
+## Testing
+
+```bash
+npm run test:editor -- "<path to the editor executable>" vscode
+```
+
+This opens the editor with Antares loaded as a development extension in a throwaway profile, with the offline `echo` provider and an isolated Muse config (no login, no model call), and runs `test/suite` inside its real extension host. It checks that the webview loads and runs under the editor's CSP, that a turn streams and renders, that the copy buttons exist, that copying reaches the host clipboard, and that *New chat* restarts cleanly. Not covered: how it *looks* in the editor, and a real model turn inside the editor.
+
 ## Project layout
 
 ```text
@@ -85,6 +93,7 @@ src/muse/uuidv7.ts    MSP requires UUIDv7 command ids (v4 is refused)
 src/ui/               chat panel, shared page markup and the startup banner
 media/chat.js|css     the chat webview (plain JS, no build step)
 scripts/spike.ts      runs the self-test from the command line
+test/                 integration suite that runs inside a real editor
 scripts/probe-*.ts    protocol probes (one minimal turn; credential state). Run deliberately
 docs/PLAN.md          roadmap, decisions, risks
 docs/PROTOCOL-NOTES.md what has been observed on the wire vs. only read from the schema
