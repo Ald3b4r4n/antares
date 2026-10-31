@@ -1044,6 +1044,14 @@
     autosize();
     input.focus();
     if (msg.note) addNotice("info", msg.note);
+    // Say which language the engine heard: with "auto" a short clip can be taken for another language, and the fix
+    // (the antares.voice.language setting) is not obvious from a wrong transcript.
+    if (msg.language && msg.engine === "faster-whisper") {
+      voiceStatus.hidden = false;
+      voiceStatus.textContent = "Heard as language: " + msg.language + ". Wrong? Set Antares \u203A Voice \u203A Language (for example pt) in Settings.";
+      clearTimeout(voiceTimer);
+      voiceTimer = setTimeout(() => { voiceStatus.hidden = true; }, 9000);
+    }
   }
   function onVoiceError(msg) {
     const node = el("div", "notice warning", msg.message);

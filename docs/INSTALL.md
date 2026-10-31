@@ -92,6 +92,7 @@ Changing mode keeps the conversation. Anything above Plan asks you to confirm fi
 | "Muse executable not found" | Set `antares.musePath`. |
 | "sandbox unavailable", shell commands fail | Read [SANDBOX.md](SANDBOX.md). Known problem with `muse serve` on Windows; Plan and Accept edits still read and edit, and Bypass runs commands (no sandbox). |
 | Microphone button says voice needs setup | Run **Antares: Set up local voice**, or set `antares.voice.home`. |
+| Dictation comes out in the wrong language | Set `antares.voice.language` (for example `pt`); see [VOICE.md](VOICE.md#the-text-comes-out-in-the-wrong-language). |
 | Not logged in | Run `muse login` in a terminal, then start a new chat. |
 | Browser control | Needs an MCP server you configure in Muse: [BROWSER.md](BROWSER.md). |
 

@@ -62,6 +62,12 @@ Default location: `%LOCALAPPDATA%\Antares\voice` on Windows. Override with the s
 | `antares.voice.maxSeconds` | 120 | A recording that reaches this length ends and is transcribed |
 | `antares.voice.idleMinutes` | 5 | Minutes after which the Whisper worker is shut down to free memory |
 
+## The text comes out in the wrong language
+
+With `antares.voice.language` on `auto`, Whisper **guesses the language from each clip**, and a short clip or a small model can guess wrong (Portuguese taken for English or Spanish, for example). Fix it by saying the language: set `antares.voice.language` to `pt` (or `en`, `es`, ... or a locale such as `pt-BR`). After each dictation Antares shows "Heard as language: xx" for a few seconds, so you can see what it guessed.
+
+Accuracy also depends on the model: `base` (default) is fast but weak on accented or noisy speech; `small` (about 465 MB) is noticeably better. Change `antares.voice.model` and run **Antares: Set up local voice** again to download it.
+
 ## How it works, and what was measured
 
 - **The microphone is read in the extension host, not in the page.** In both VS Code 1.143.1 and Antigravity IDE 1.107.0 the webview's iframe has no `microphone` in its `allow` list, and `getUserMedia` returns `NotAllowedError: Permission denied` (measured in both, in the real windows). So the page only shows the state and the extension host records.

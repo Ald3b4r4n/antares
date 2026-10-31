@@ -28,7 +28,7 @@ export function readVoiceSettings(): VoiceSettings {
 /** Messages the page understands. */
 export type VoiceMessage =
   | { type: "voice"; state: VoiceState["state"]; engine?: EngineId; startedAt?: number }
-  | { type: "voiceResult"; text: string; engine: EngineId; note?: string }
+  | { type: "voiceResult"; text: string; engine: EngineId; language?: string; note?: string }
   | { type: "voiceError"; message: string; canSetup: boolean };
 
 /**
@@ -64,7 +64,7 @@ export class VoiceBridge {
     }
     const controller = new VoiceController({ recorder, engines, settings: readVoiceSettings });
     controller.on("state", (s: VoiceState) => this.post({ type: "voice", state: s.state, engine: s.state === "idle" ? undefined : s.engine, startedAt: s.state === "recording" ? s.startedAt : undefined }));
-    controller.on("result", (r: TranscribeResult) => this.post({ type: "voiceResult", text: r.text, engine: r.engine, note: r.note }));
+    controller.on("result", (r: TranscribeResult) => this.post({ type: "voiceResult", text: r.text, engine: r.engine, language: r.language, note: r.note }));
     controller.on("error", (e: { message: string; canSetup: boolean }) => this.post({ type: "voiceError", message: e.message, canSetup: e.canSetup }));
     return controller;
   }

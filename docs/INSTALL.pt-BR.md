@@ -92,6 +92,7 @@ Trocar de modo mantém a conversa. Qualquer coisa acima de Plan pede confirmaç�
 | "Muse executable not found" | Configure `antares.musePath`. |
 | "sandbox unavailable", comandos de shell falham | Leia o [SANDBOX.md](SANDBOX.md). É um problema conhecido do `muse serve` no Windows; Plan e Accept edits ainda leem e editam, e o Bypass roda comandos (sem sandbox). |
 | O microfone diz que a voz precisa de configuração | Rode **Antares: Set up local voice** ou configure `antares.voice.home`. |
+| O ditado sai no idioma errado | Configure `antares.voice.language` (por exemplo `pt`); veja o [VOICE.md](VOICE.md#the-text-comes-out-in-the-wrong-language). |
 | Sem login | Rode `muse login` em um terminal e abra um chat novo. |
 | Controle de navegador | Precisa de um servidor MCP que você configura no Muse: [BROWSER.md](BROWSER.md). |
 

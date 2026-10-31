@@ -429,12 +429,14 @@ export class ChatPanel {
     }
     const resumable = this.currentSessionId !== undefined && !vscode.workspace.getConfiguration("antares").get<string>("dev.provider");
     if (mode.confirm) {
-      const action = resumable ? "Switch mode" : "Start new chat";
+      // Only a chat that has said something and cannot be resumed (the offline test provider) really starts over.
+      const startsOver = !resumable && this.hasConversation;
+      const action = startsOver ? "Start new chat" : "Switch mode";
       const choice = await vscode.window.showWarningMessage(
         `Switch to ${mode.label} (${mode.profileId})?`,
         { modal: true, detail: `${mode.note}
 
-${resumable ? "Muse is restarted and this conversation continues under the new mode." : "Switching mode ends the current chat."}` },
+${resumable ? "Muse is restarted and this conversation continues under the new mode." : startsOver ? "Switching mode ends the current chat." : "This chat has no messages yet, so the new mode simply applies."}` },
         action,
       );
       if (choice !== action) {

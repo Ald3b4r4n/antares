@@ -13,6 +13,8 @@ Everything below under "Unreleased" is part of this build. In one place:
 - **Sandbox, offered at the right moment:** when the sandbox is unavailable, the note under the mode selector and the failed shell call carry a **Switch to Bypass permissions…** button (it opens the confirmation; it never switches by itself), and the first blocked command in a chat also raises a notice in the message flow.
 - **Activity-bar launcher:** an Antares icon in the activity bar (next to the other views); showing it opens the chat, and its view has buttons for usage and voice setup.
 - **"+" menu additions:** *Add current file* (an @mention), *Add selection* (a quoted block naming the file and lines, capped at 20,000 characters) and files dragged from the Explorer (they carry only their addresses).
+- **Voice language:** after each dictation Antares shows which language the engine heard, and the docs explain that `auto` guesses per clip (set `antares.voice.language`, and consider the `small` model).
+- **Mode switch wording:** a chat with no messages yet no longer says "Start new chat" in the switch dialog; it says the new mode simply applies.
 - **Version** bumped from 0.0.1 to 0.1.0.
 
 ## Unreleased — phase 3D (second slice): changes in this chat
