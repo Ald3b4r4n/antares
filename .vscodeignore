@@ -6,3 +6,6 @@ tsconfig.json
 esbuild.mjs
 **/*.map
 .gitignore
+spike-output/**
+.git/**
+*.vsix
