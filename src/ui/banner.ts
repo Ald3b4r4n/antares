@@ -1,14 +1,28 @@
 /** Startup banner, shown at the top of the Antares panel (same idea as the opencode splash). */
-const BACKTICK = String.fromCharCode(96);
 
-// String.raw keeps the backslashes of the figlet "small" lettering literal. The line that ends in a
-// backslash, and the one that needs a backtick, are assembled from pieces so no template literal
-// has to end in "\" or contain a raw backtick.
-export const ANTARES_ASCII = [
-  String.raw`   _   _  _ _____   _   ___ ___ ___`,
-  String.raw`  /_\ | \| |_   _| /_\ | _ \ __/ __|`,
-  String.raw` / _ \| .` + BACKTICK + String.raw` | | |  / _ \|   / _|\__ ` + "\\",
-  String.raw`/_/ \_\_|\_| |_| /_/ \_\_|_\___|___/`,
-].join("\n");
+// A 5-row block font. Solid blocks stay legible at small sizes and in any monospace font, unlike
+// slash-and-underscore lettering, which blurred in the real editor.
+const GLYPHS: Record<string, string[]> = {
+  A: [" ███ ", "█   █", "█████", "█   █", "█   █"],
+  N: ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
+  T: ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
+  R: ["████ ", "█   █", "████ ", "█  █ ", "█   █"],
+  E: ["█████", "█    ", "████ ", "█    ", "█████"],
+  S: [" ████", "█    ", " ███ ", "    █", "████ "],
+};
+
+export function blockText(word: string): string {
+  const rows: string[] = ["", "", "", "", ""];
+  for (const ch of word.toUpperCase()) {
+    const glyph = GLYPHS[ch];
+    if (!glyph) throw new Error(`no glyph for ${ch}`);
+    glyph.forEach((line, i) => {
+      rows[i] += `${line} `;
+    });
+  }
+  return rows.map((r) => r.trimEnd()).join("\n");
+}
+
+export const ANTARES_ASCII = blockText("ANTARES");
 
 export const ANTARES_TAGLINE = "α Scorpii · an open interface for Muse Code";

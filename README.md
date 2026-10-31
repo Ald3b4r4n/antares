@@ -2,6 +2,11 @@
   <img src="media/antares.png" alt="Antares" width="96">
 </p>
 
+<p align="center">
+  <img src="docs/images/antares-vscode.png" alt="Antares open in VS Code, with the offline echo provider" width="720"><br>
+  <sub>Antares in VS Code (offline echo provider, throwaway profile).</sub>
+</p>
+
 ```text
    _   _  _ _____   _   ___ ___ ___
   /_\ | \| |_   _| /_\ | _ \ __/ __|
@@ -51,7 +56,7 @@ Known limits worth stating up front:
 ## Requirements
 
 - Muse Code installed and, for later phases, logged in. Phase 0 needs no login.
-- VS Code 1.90+ or a compatible fork. Integration-tested inside **VS Code 1.143.1** and **Antigravity IDE 1.107.0** (see [Testing](#testing)). The protocol layer and the chat core are also tested headless on Windows against Muse 1.4.14.
+- VS Code 1.90+ or a compatible fork. Tested inside **VS Code 1.143.1** and **Antigravity IDE 1.107.0**, including a real-window check (see [Testing](#testing)). The protocol layer and the chat core are also tested headless on Windows against Muse 1.4.14.
 - Node.js 22+ to build from source.
 
 ## Try it (from source)
@@ -83,7 +88,16 @@ To install in Antigravity or another fork, build a VSIX with `npm run package` a
 npm run test:editor -- "<path to the editor executable>" vscode
 ```
 
-This opens the editor with Antares loaded as a development extension in a throwaway profile, with the offline `echo` provider and an isolated Muse config (no login, no model call), and runs `test/suite` inside its real extension host. It checks that the webview loads and runs under the editor's CSP, that a turn streams and renders, that the copy buttons exist, that copying reaches the host clipboard, and that *New chat* restarts cleanly. Not covered: how it *looks* in the editor, and a real model turn inside the editor.
+This opens the editor with Antares loaded as a development extension in a throwaway profile, with the offline `echo` provider and an isolated Muse config (no login, no model call), and runs `test/suite` inside its real extension host. It checks that the webview loads and runs under the editor's CSP, that a turn streams and renders, that the copy buttons exist, that copying reaches the host clipboard, and that *New chat* restarts cleanly. 
+### Real-window check
+
+```bash
+node scripts/e2e-editor.mjs "<path to the editor executable>" vscode
+```
+
+This launches the editor for real, with Antares loaded as a development extension in a throwaway profile (offline `echo` provider, isolated Muse config, no login, no model call), connects to it over the Chrome DevTools Protocol, opens the panel from the command palette, drives the **real webview** and saves screenshots of the real window to `spike-output/e2e/`. It checks 18 things, among them: the banner and logo load through the webview URI; a message round-trips; the copy button reaches the clipboard through the extension host; real key events (Enter sends, Shift+Enter does not); a pasted image shows its thumbnail under the real Content-Security-Policy and is sent; changing the profile asks for confirmation in the editor's own dialog and restarts the chat; the history panel answers; the status bar item exists; and the panel does not overflow when narrow (down to about 220 px). It found two real problems that the browser preview and the headless tests had not: an unreadable banner and a layout that overflowed in narrow panels. Passing on VS Code 1.143.1 and Antigravity IDE 1.107.0. On the first run, Antigravity IDE shows a welcome screen; the script only presses its plain "Get Started" button and never signs in.
+
+Not covered: a real model turn or a real approval request inside the editor, and dropping files from the operating system onto the panel.
 
 ## Project layout
 
