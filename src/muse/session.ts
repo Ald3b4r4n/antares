@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { MuseHost, MspError } from "./host.ts";
-import { mapApprovalRequest, mapModels, mapNotification, mapUsage, type ChatEvent, type ModelInfo } from "./events.ts";
+import { mapApprovalRequest, mapModels, mapNotification, mapUsage, sandboxNote, type ChatEvent, type ModelInfo } from "./events.ts";
 import { canonicalPath, mapPlugins, mapSkills, parseSlash, rootsFor, type PluginRow, type SkillRow } from "./composer.ts";
 import { buildInputParts, validateImages, type ImageInput } from "./images.ts";
 import { mapSessionRows, readHistory, type SessionRowView } from "./sessions.ts";
@@ -151,6 +151,7 @@ export class MuseSession extends EventEmitter {
       durability: init.sessionDurability,
     };
     host.notify("initialized");
+    this.emitEvent({ type: "host", version: this.info.version, sandbox: this.info.sandbox, sandboxNote: sandboxNote(this.info.sandbox) });
     return host;
   }
 

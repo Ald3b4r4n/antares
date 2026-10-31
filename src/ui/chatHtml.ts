@@ -64,6 +64,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
   <ul id="pending" class="pending" aria-label="Queued messages" hidden></ul>
   <div id="folders" class="folders" aria-label="Folders added to this chat" hidden></div>
   <div id="modeMenu" class="menu mode-menu" role="menu" aria-label="Permission mode" hidden></div>
+  <div id="sandboxNote" class="mode-note warn" role="status" hidden></div>
   <div id="modeNote" class="mode-note" hidden><span id="modeNoteText"></span> <button id="modeNoteGo" class="link tiny" hidden></button></div>
   <div id="attachments" class="attachments" hidden></div>
   <div id="voiceStatus" class="voice-status" role="status" aria-live="polite" hidden></div>

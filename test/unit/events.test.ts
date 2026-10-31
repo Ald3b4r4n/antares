@@ -2,7 +2,7 @@
 // approval shapes come from the exported schema (no real approval request has been seen yet).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapApprovalRequest, mapNotification, subjectView, summarizeArgs } from "../../src/muse/events.ts";
+import { failureHint, mapApprovalRequest, mapNotification, sandboxNote, subjectView, summarizeArgs } from "../../src/muse/events.ts";
 
 const requirementId = { approvalId: "ap-1", sourceIndex: 2 };
 const base = {
@@ -20,7 +20,7 @@ const base = {
 
 test("tool call (observed shape): started, held for a hook", () => {
   const e = mapNotification("item/started", { item: { itemId: "i1", kind: "toolCall", tool: "powershell", callId: "c", args: '{"command":"echo antares","description":"Echo antares"}', held: true, heldFor: "hook", status: "inProgress" } });
-  assert.deepEqual(e, { type: "toolCall", itemId: "i1", tool: "powershell", summary: "echo antares", status: "inProgress", held: true, heldFor: "hook", failure: undefined, output: undefined });
+  assert.deepEqual(e, { type: "toolCall", itemId: "i1", tool: "powershell", summary: "echo antares", status: "inProgress", held: true, heldFor: "hook", failure: undefined, hint: undefined, output: undefined });
 });
 
 test("tool call (observed shape): failed closed keeps the failure and drops output", () => {
@@ -100,4 +100,35 @@ test("summarizeArgs: JSON string, object, plain text, truncation", () => {
 test("turn failure (observed shape): authRequired", () => {
   const e = mapNotification("turn/completed", { turnId: "t", terminal: "failed", reason: "not logged in", durationMs: 99, error: { kind: "authRequired", message: "not logged in: run /login to add an API key", retryable: false } });
   assert.equal(e?.type === "turnCompleted" && e.errorKind, "authRequired");
+});
+
+test("failure hints: the sandbox failure seen on the real host gets the fix, per platform", () => {
+  const seen = "environment failure: sandbox enforcement unavailable: windows_elevated setup_required: windows elevated sandbox setup has not run";
+  const win = failureHint(seen, "win32");
+  assert.match(win ?? "", /shell commands fail before they start/);
+  assert.match(win ?? "", /muse sandbox windows setup/);
+  assert.match(win ?? "", /Antares never runs it/);
+  const other = failureHint(seen, "linux");
+  assert.doesNotMatch(other ?? "", /muse sandbox windows setup/);
+  assert.match(other ?? "", /documentation/);
+  assert.match(failureHint("approval aborted", "win32") ?? "", /rejected/);
+  assert.equal(failureHint("tool failed: file not found", "win32"), undefined);
+  assert.equal(failureHint(undefined), undefined);
+});
+
+test("failure hints: the tool card carries the hint only when there is a failure it recognizes", () => {
+  const failed = mapNotification("item/completed", { item: { itemId: "i2", kind: "toolCall", tool: "powershell", args: '{"command":"git status"}', status: "failed", failureReason: "environment failure: sandbox enforcement unavailable: windows_elevated setup_required" } });
+  assert.equal(failed?.type, "toolCall");
+  if (failed?.type === "toolCall") assert.match(failed.hint ?? "", /sandbox is not available/);
+  const rejected = mapNotification("item/completed", { item: { itemId: "i3", kind: "toolCall", tool: "powershell", args: '{"command":"git status"}', status: "rejected", failureReason: "approval aborted" } });
+  if (rejected?.type === "toolCall") assert.match(rejected.hint ?? "", /you chose Reject/);
+  const fine = mapNotification("item/completed", { item: { itemId: "i4", kind: "toolCall", tool: "read_file", args: '{"path":"a"}', status: "completed", visibleOutput: "x" } });
+  if (fine?.type === "toolCall") assert.equal(fine.hint, undefined);
+});
+
+test("sandbox note: only when the host says it cannot enforce a sandbox", () => {
+  assert.equal(sandboxNote("available", "win32"), undefined);
+  assert.equal(sandboxNote(undefined, "win32"), undefined, "no claim when the host did not say");
+  assert.match(sandboxNote("unavailable", "win32") ?? "", /muse sandbox windows setup/);
+  assert.doesNotMatch(sandboxNote("unavailable", "darwin") ?? "", /windows/);
 });

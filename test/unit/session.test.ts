@@ -103,3 +103,17 @@ test("an approval request that cannot be read stops the turn instead of guessing
     await t.done();
   }
 });
+
+test("host event: the sandbox state the host reports is announced as soon as it starts, before any session", async () => {
+  const t = run(":ask-me");
+  try {
+    await t.session.warm();
+    const host = t.events.find((e) => e.type === "host");
+    assert.ok(host && host.type === "host");
+    assert.equal(host.sandbox, "unavailable", "the fake host reports an unavailable sandbox, as the real one does on the test PC");
+    assert.match(host.sandboxNote ?? "", /sandbox is not available/);
+    assert.equal(t.events.some((e) => e.type === "session"), false, "warming starts no session");
+  } finally {
+    await t.done();
+  }
+});

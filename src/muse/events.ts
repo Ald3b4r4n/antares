@@ -65,6 +65,8 @@ export type ChatEvent =
   /** What the host did with a submitted prompt: ran it (`started`), held it (`queued`) or folded it into the running turn (`steered`). */
   | { type: "submitted"; turnId: string; disposition: "started" | "queued" | "steered"; text: string }
   | { type: "unqueued"; turnId: string }
+  /** What the host reported when it started, before any session: its version and whether it can enforce the sandbox. */
+  | { type: "host"; version?: string; sandbox?: string; sandboxNote?: string }
   | { type: "userMessage"; itemId: string; text: string; attachments: AttachmentInfo[] }
   | { type: "assistantStarted"; itemId: string }
   | { type: "assistantDelta"; itemId: string; delta: string }
@@ -123,6 +125,8 @@ export type ChatEvent =
       held: boolean;
       heldFor?: string;
       failure?: string;
+      /** Help for a failure Antares recognizes (see `failureHint`). */
+      hint?: string;
       output?: string;
     }
   | {
@@ -345,6 +349,29 @@ export function summarizeArgs(args: unknown): string {
   return clip(typeof args === "string" ? args : (JSON.stringify(args) ?? ""), 200);
 }
 
+const SANDBOX_FIX_WINDOWS = " On Windows, run `muse sandbox windows setup` once from an administrator terminal, after reading what it does; Antares never runs it.";
+const SANDBOX_FIX_OTHER = " See Muse's documentation for setting up its sandbox on this system.";
+
+/**
+ * Plain help for tool failures that are about the environment, not the task. Seen on the real host: with
+ * the sandbox unavailable a shell command fails before it starts ("sandbox enforcement unavailable:
+ * windows_elevated setup_required"), and a rejected approval ends a tool call with "approval aborted".
+ */
+export function failureHint(failure: string | undefined, platform: string = process.platform): string | undefined {
+  if (!failure) return undefined;
+  if (/sandbox enforcement unavailable|setup_required/i.test(failure)) {
+    return `Muse's sandbox is not available on this computer, so shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}`;
+  }
+  if (/approval aborted/i.test(failure)) return "This approval was rejected: you chose Reject, the automatic reviewer declined it, or the turn was stopped while it waited.";
+  return undefined;
+}
+
+/** Shown while the chat is in a mode that runs commands inside the sandbox, when the host says it cannot enforce one. */
+export function sandboxNote(availability: string | undefined, platform: string = process.platform): string | undefined {
+  if (availability !== "unavailable") return undefined;
+  return `Muse's sandbox is not available on this computer. In this mode shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}`;
+}
+
 function mapToolCall(item: Obj, itemId: string): ChatEvent {
   const failure = str(item.failureReason);
   const output = str(item.visibleOutput);
@@ -357,6 +384,7 @@ function mapToolCall(item: Obj, itemId: string): ChatEvent {
     held: item.held === true,
     heldFor: str(item.heldFor),
     failure: failure ? clip(failure, 600) : undefined,
+    hint: failureHint(failure),
     output: output && !failure ? clip(output, 600) : undefined,
   };
 }

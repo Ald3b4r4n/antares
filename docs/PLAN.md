@@ -59,6 +59,14 @@ Como a troca funciona: `session/setPermissionProfile` (experimental) existe e fu
 
 Verificado: 7 testes unitários novos (119 no total); host real sem turno (troca ao vivo, retomada com cada perfil, `session/read`); **um** turno real com `:ask-me` + `promptUnmatched` (escrita em pasta descartável, nada aprovado); janela real no VS Code 1.143.1 e no Antigravity IDE 1.107.0: 32 checagens do fluxo com o provedor de teste e 15 do fluxo com o host real (sessão aberta, Plan para Accept edits com diálogo, retomada, Shift+Tab de volta para Plan, Bypass pedindo confirmação e cancelado). **Não verificado:** a troca com uma conversa que já tenha turnos (usa o mesmo caminho do histórico, mas não foi exercitada), e o comportamento do `:auto-review` em turnos reais.
 
+### Correções após o primeiro uso real
+
+| Achado | Estado |
+|---|---|
+| Shell falha antes de começar quando o sandbox do Windows não foi configurado (`windows_elevated setup_required`); o modelo então tenta escalar por aprovação | **Corrigido** na parte da Antares: aviso sob o seletor de modo e dica no cartão da ferramenta, com o comando `muse sandbox windows setup` (do terminal de administrador do usuário; a Antares nunca o executa). A configuração em si é do ambiente do usuário |
+| "approval aborted" sem cartão de aprovação visível | **Explicado na dica**; o histórico retomado não repete cartões de aprovação (limite do host). Não foi possível saber, só pela imagem, se foi rejeição do usuário, do revisor automático ou interrupção |
+| `write_todos` e outras ferramentas mostram o JSON cru no resumo | Aberto: fica para a fase 3D (apresentação das ferramentas) |
+
 ## Fase 3: conectores, navegador e imagens
 
 ### 3A. Conectores e plugins

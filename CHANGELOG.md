@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — fixes from the first real use
+
+- **The sandbox, explained.** On a Windows PC where Muse's elevated sandbox was never set up, a shell command in Accept edits or Auto fails before it starts ("sandbox enforcement unavailable: windows_elevated setup_required") and the model then tries an approval escalation. Antares now (1) reads the host's `sandboxAvailability` as soon as the host starts and shows a note under the mode selector in modes that run commands in the sandbox, and (2) adds a hint under that failure on the tool card. Both name the fix, `muse sandbox windows setup` from an administrator terminal, and say that Antares never runs it. File reads and edits keep working.
+- A tool call that ends with "approval aborted" now says what that means: it was rejected by you, by the automatic reviewer, or the turn was stopped while it waited.
+- New `host` event (version and sandbox state before any session), so the footer shows the sandbox state before the first message too.
+- Tests: 123 in total (4 new); the real-window runs pass on both editors (32 and 17 checks).
+
 ## Unreleased — phase 2C: permission modes
 
 - A mode selector next to the model picker replaces the header's profile dropdown: **Auto** (`:auto-review`), **Manual** (unavailable), **Accept edits** (`:ask-me`), **Plan** (`:read-only`, the default) and **Bypass permissions** (`:unrestricted`). Keys 1 to 5 pick in the open menu; Shift+Tab in the message box cycles Auto, Accept edits and Plan and never lands on Bypass.

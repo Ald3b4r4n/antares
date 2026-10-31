@@ -69,6 +69,7 @@
     modes: [], // the permission modes the extension offers, with the profile each one starts
     modeId: undefined,
     sandbox: undefined,
+    sandboxNote: undefined, // set when the host cannot enforce its sandbox
   };
 
   const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
@@ -190,6 +191,7 @@
     node.append(head);
     if (e.held) node.append(el("div", "tool-note", "held" + (e.heldFor ? " for " + e.heldFor : "")));
     if (e.failure) node.append(el("div", "tool-fail", e.failure));
+    if (e.failure && e.hint) node.append(el("div", "tool-hint", e.hint));
     if (e.output) {
       const details = el("details", "tool-out");
       details.append(el("summary", "", "output"), el("pre", "", e.output));
@@ -438,6 +440,11 @@
     // Plan is a way to look before acting: offer the step that carries the plan out.
     const accept = state.modes.find((m) => m.id === "acceptEdits");
     const inPlan = state.modeId === "plan" && !!accept && !accept.unavailable;
+    // A mode that runs commands inside the sandbox cannot run them when the host has none: say so up front.
+    const sandboxNoteEl = $("sandboxNote");
+    const needsSandbox = !!state.sandboxNote && (state.modeId === "acceptEdits" || state.modeId === "auto");
+    sandboxNoteEl.hidden = !needsSandbox;
+    if (needsSandbox) sandboxNoteEl.textContent = state.sandboxNote;
     modeNote.hidden = !inPlan;
     if (inPlan) {
       $("modeNoteText").textContent = "Plan mode: Muse can read but not change anything. Ask for a plan (try /plan), then carry it out in Accept edits.";
@@ -510,6 +517,12 @@
         break;
       case "unqueued":
         removePending(e.turnId);
+        break;
+      case "host":
+        state.sandbox = e.sandbox;
+        state.sandboxNote = e.sandboxNote;
+        renderModes();
+        renderMeta();
         break;
       case "userMessage": {
         // Count images by the "[Image #n]" markers as well: an ephemeral host sends the markers but an empty

@@ -260,6 +260,10 @@ try {
     const accepted = await modeState();
     check("the session continued under :ask-me (label, footer and notice agree, no error)", accepted.label === "Accept edits" && /:ask-me/.test(accepted.footer) && accepted.errors === 0 && !accepted.planNote, JSON.stringify(accepted));
     await shot("24-accept-edits");
+    // The sandbox note follows what the host reported: shown in a mode that runs commands in the sandbox only
+    // when the host says it cannot enforce one (this depends on the machine, so the check compares the two).
+    const sb = await evalWeb("({ shown: !d.getElementById('sandboxNote').hidden, text: d.getElementById('sandboxNote').textContent.slice(0, 140), unavailable: /sandbox unavailable/.test(d.getElementById('meta').textContent) })");
+    check("the sandbox note appears in Accept edits exactly when the host reports no sandbox", sb.shown === sb.unavailable && (!sb.shown || /fail before they start/.test(sb.text)), JSON.stringify(sb));
 
     // The resumed session works: its skill list answers again.
     await slashOpen();
@@ -272,6 +276,8 @@ try {
     await evalWeb("(() => { const i = d.getElementById('input'); i.focus(); i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })); return true; })()");
     await waitFor("Shift+Tab to reach Plan", () => evalWeb("d.getElementById('modeLabel').textContent === 'Plan' && [...d.querySelectorAll('.notice')].some(n => /Switched to Plan/.test(n.textContent))"), 60000);
     const back = await modeState();
+    const planSb = await evalWeb("!d.getElementById('sandboxNote').hidden");
+    check("the sandbox note is not shown in Plan (nothing runs there)", planSb === false);
     check("Shift+Tab steps from Accept edits to Plan with no dialog, and the footer follows", back.label === "Plan" && /:read-only/.test(back.footer) && back.errors === 0, JSON.stringify(back));
 
     // Bypass has to be chosen on purpose and says what it removes; cancelling leaves the mode alone.
