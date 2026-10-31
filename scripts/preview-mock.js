@@ -28,7 +28,8 @@ const catalog = () => CATALOG.map((m) => ({ ...m, isActive: m.modelId === (model
 let ledgerToday = 0;
 let usageNow;
 let refreshCount = 0;
-const config = () => ({ type: "config", profileId, profiles: PROFILES, modelId, effort, usage: usageNow, ledger: { todayTokens: ledgerToday, weekTokens: ledgerToday }, thresholds: [80, 95] });
+const modeOf = (id) => window.__MODES.find((m) => m.profileId === id)?.id;
+const config = () => ({ type: "config", profileId, modeId: modeOf(profileId), modes: window.__MODES, modelId, effort, usage: usageNow, ledger: { todayTokens: ledgerToday, weekTokens: ledgerToday }, thresholds: [80, 95] });
 let n = 0;
 let turnRunning = false;
 let nextTurnId;
@@ -218,9 +219,16 @@ window.acquireVsCodeApi = () => ({
       setTimeout(() => post({ type: "extras", kind: "plugins", rows: [{ id: "acme", version: "1.2.0", enabled: true, source: "marketplaceUserAdded" }] }), 200);
     }
     else if (m.type === "decide") decisions.get(m.approvalId)?.({ decision: m.choiceId === "c-deny" ? "denied" : m.choiceId === "c-once" ? "approved" : m.choiceId === "c-session" ? "approvedForSession" : "approvedPolicyAmendment" });
-    else if (m.type === "setProfile") {
-      profileId = m.profileId;
-      post({ type: "reset" });
+    else if (m.type === "setMode" || m.type === "cycleMode") {
+      const order = ["auto", "acceptEdits", "plan"];
+      const wanted = m.type === "cycleMode" ? order[(order.indexOf(modeOf(profileId)) + 1) % order.length] : m.modeId;
+      const mode = window.__MODES.find((x) => x.id === wanted);
+      if (!mode || mode.unavailable) emit({ type: "notice", level: "info", text: (mode ? mode.label : "That") + " mode is not available. " + (mode?.unavailable ?? "") });
+      else if (mode.profileId !== profileId) {
+        profileId = mode.profileId;
+        post({ type: "reset" });
+        emit({ type: "notice", level: "info", text: "Switched to " + mode.label + " (" + mode.profileId + ")." });
+      }
       post(config());
     } else if (m.type === "copy") {
       window.__lastCopied = m.text;

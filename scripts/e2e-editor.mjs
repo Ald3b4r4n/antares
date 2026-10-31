@@ -12,6 +12,9 @@ import { join, resolve } from "node:path";
 
 const exe = process.argv[2];
 const REAL = process.env.E2E_REAL === "1";
+// E2E_MODES=1: the real host, no model call. A session is opened (the slash palette needs one) and the permission
+// mode is switched through the real UI, which continues that session under the new profile.
+const MODES = process.env.E2E_MODES === "1";
 // Voice mode: fake (no microphone, no engine), error (engine not set up: the setup offer), real (the real
 // microphone and the real faster-whisper from ANTARES_VOICE_HOME; records about 2.5 s and keeps nothing).
 const VOICE = process.env.E2E_VOICE ?? "fake";
@@ -35,7 +38,7 @@ writeFileSync(
   join(userData, "User", "settings.json"),
   JSON.stringify({ "workbench.startupEditor": "none", "security.workspace.trust.enabled": false, "telemetry.telemetryLevel": "off", "update.mode": "none", "extensions.autoCheckUpdates": false, "workbench.tips.enabled": false, "window.restoreWindows": "none", "workbench.colorTheme": "Default Dark Modern", "chat.disableAIFeatures": true, "window.dialogStyle": "custom", "workbench.secondarySideBar.defaultVisibility": "hidden" }, null, 2),
 );
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 
 const child = spawn(
@@ -206,7 +209,8 @@ try {
     title: d.title,
     hero: !!d.querySelector('.hero img') && d.querySelector('pre.logo')?.textContent.split(String.fromCharCode(10)).length === 5,
     logoLoaded: d.querySelector('.hero img')?.naturalWidth > 0,
-    profileOptions: [...d.querySelectorAll('#profile option')].map(o => o.value),
+    modes: [...d.querySelectorAll('#modeMenu .menu-item')].map(o => o.dataset.mode + (o.classList.contains('unavailable') ? '(unavailable)' : '')),
+    modeLabel: d.getElementById('modeLabel').textContent,
     modelControls: !!d.getElementById('model') && !!d.getElementById('effort'),
     footer: d.getElementById('meta').textContent,
     hint: d.getElementById('hint').textContent.slice(0, 60),
@@ -215,11 +219,72 @@ try {
   })`);
   console.log("DOM:", JSON.stringify(dom));
   check("banner and logo render (SVG loaded through the webview URI)", dom.hero && dom.logoLoaded);
-  check("profile picker lists the four profiles", dom.profileOptions.length === 4);
+  check("the mode selector lists Auto, Manual (unavailable), Accept edits, Plan and Bypass, starting in Plan", JSON.stringify(dom.modes) === JSON.stringify(["auto", "manual(unavailable)", "acceptEdits", "plan", "bypass"]) && dom.modeLabel === "Plan", JSON.stringify({ modes: dom.modes, label: dom.modeLabel }));
   check("model and effort controls exist", dom.modelControls);
   check("page styles loaded", dom.cssLoaded);
 
-  if (REAL) {
+  if (MODES) {
+    const openMenu = () => evalWeb("(() => { d.getElementById('modeBtn').click(); return true; })()");
+    const pick = (id) => evalWeb("(() => { d.querySelector('#modeMenu [data-mode=" + id + "]').click(); return true; })()");
+    const modeState = () => evalWeb("({ label: d.getElementById('modeLabel').textContent, footer: d.getElementById('meta').textContent.slice(0, 60), notices: [...d.querySelectorAll('.notice')].map(n => n.textContent.slice(0, 130)), errors: d.querySelectorAll('.notice.error').length, planNote: !d.getElementById('modeNote').hidden })");
+    const dialogNow = () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 420), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()");
+    const clickDialog = (label) => evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === " + JSON.stringify(label) + "); btn.click(); return true; })()");
+    const slashOpen = () => evalWeb("(() => { const i = d.getElementById('input'); i.focus(); i.value = '/'; i.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()");
+    const slashClear = () => evalWeb("(() => { const i = d.getElementById('input'); i.value = ''; i.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()");
+    const slashAnswered = "d.querySelectorAll('#slashMenu .slash-item').length > 0 || /Could not/.test(d.getElementById('slashMenu').textContent)";
+
+    const start = await modeState();
+    check("Plan mode shows its note and the button that carries the plan out", start.label === "Plan" && start.planNote, JSON.stringify(start));
+    await openMenu();
+    await shot("22-mode-menu");
+    await pick("manual");
+    await sleep(500);
+    const manual = await modeState();
+    check("Manual is refused with the observed reason and the mode does not change", manual.label === "Plan" && manual.notices.some((n) => /Manual mode is not available/.test(n)), JSON.stringify(manual.notices));
+
+    // A session must exist to be continued: opening the slash palette starts one (no model call).
+    await slashOpen();
+    await waitFor("the session to start (the skill list)", () => evalWeb(slashAnswered), 60000);
+    const opened = await evalWeb("({ items: d.querySelectorAll('#slashMenu .slash-item').length, text: d.getElementById('slashMenu').textContent.slice(0, 100) })");
+    check("a real session is open (the host answered the skill list)", opened.items > 0, JSON.stringify(opened));
+    await slashClear();
+
+    // Plan -> Accept edits: asks first, then the same session is resumed under :ask-me.
+    await openMenu();
+    await pick("acceptEdits");
+    const ask = await waitFor("the mode confirmation", dialogNow, 15000);
+    check("switching to Accept edits asks first and says the conversation continues", /Accept edits/.test(ask.text) && /ask-me/.test(ask.text) && /continues/.test(ask.text) && ask.buttons.includes("Switch mode"), JSON.stringify(ask));
+    await shot("23-mode-confirm");
+    await clickDialog("Switch mode");
+    await waitFor("the switch to finish", () => evalWeb("d.getElementById('modeLabel').textContent === 'Accept edits' && [...d.querySelectorAll('.notice')].some(n => /Switched to Accept edits/.test(n.textContent))"), 60000);
+    const accepted = await modeState();
+    check("the session continued under :ask-me (label, footer and notice agree, no error)", accepted.label === "Accept edits" && /:ask-me/.test(accepted.footer) && accepted.errors === 0 && !accepted.planNote, JSON.stringify(accepted));
+    await shot("24-accept-edits");
+
+    // The resumed session works: its skill list answers again.
+    await slashOpen();
+    await waitFor("the resumed session to answer", () => evalWeb(slashAnswered), 60000);
+    const resumed = await evalWeb("d.querySelectorAll('#slashMenu .slash-item').length");
+    check("the resumed session answers requests", resumed > 0, String(resumed));
+    await slashClear();
+
+    // Shift+Tab: Accept edits -> Plan (stepping down needs no confirmation).
+    await evalWeb("(() => { const i = d.getElementById('input'); i.focus(); i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })); return true; })()");
+    await waitFor("Shift+Tab to reach Plan", () => evalWeb("d.getElementById('modeLabel').textContent === 'Plan' && [...d.querySelectorAll('.notice')].some(n => /Switched to Plan/.test(n.textContent))"), 60000);
+    const back = await modeState();
+    check("Shift+Tab steps from Accept edits to Plan with no dialog, and the footer follows", back.label === "Plan" && /:read-only/.test(back.footer) && back.errors === 0, JSON.stringify(back));
+
+    // Bypass has to be chosen on purpose and says what it removes; cancelling leaves the mode alone.
+    await openMenu();
+    await pick("bypass");
+    const strong = await waitFor("the bypass confirmation", dialogNow, 15000);
+    check("Bypass permissions warns that there is no sandbox and no prompts", /No filesystem sandbox/.test(strong.text) && /no approval prompts/.test(strong.text), JSON.stringify(strong.text.slice(0, 160)));
+    await shot("25-bypass-confirm");
+    await clickDialog("Cancel");
+    await sleep(800);
+    const cancelled = await modeState();
+    check("cancelling the Bypass dialog leaves the mode as it was", cancelled.label === "Plan", JSON.stringify(cancelled));
+  } else if (REAL) {
     // REAL mode: the user's own Muse login and config, a real model turn, a REAL approval request.
     // Safety policy, enforced here and not by the page: the only thing ever allowed is a one-time fetch of
     // example.com (a public page); every other approval is rejected.
@@ -476,15 +541,16 @@ try {
     }
   }
 
-  // Profile change: a native modal confirmation (workbench dialog), then a fresh chat with the new profile.
-  await evalWeb(`(() => { const s = d.getElementById('profile'); s.value = ':ask-me'; s.dispatchEvent(new w.Event('change')); return true; })()`);
-  const dialog = await waitFor("the confirmation dialog", () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 160), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()"), 10000);
-  check("changing to :ask-me asks for confirmation in a native dialog", /ask-me/.test(dialog.text) && dialog.buttons.some((b) => /Start new chat/.test(b)), JSON.stringify(dialog.buttons));
+  // Mode change: a native modal confirmation (workbench dialog). The offline test provider keeps no stored session,
+  // so the chat restarts (the continue-the-session path is checked with E2E_MODES=1).
+  await evalWeb("(() => { d.getElementById('modeBtn').click(); d.querySelector('#modeMenu [data-mode=acceptEdits]').click(); return true; })()");
+  const dialog = await waitFor("the confirmation dialog", () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 260), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()"), 10000);
+  check("changing to Accept edits asks for confirmation in a native dialog", /Accept edits/.test(dialog.text) && /ask-me/.test(dialog.text) && dialog.buttons.some((b) => /Start new chat/.test(b)), JSON.stringify(dialog.buttons));
   await shot("09-profile-dialog");
   await evalPage(`(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => /Start new chat/.test(x.textContent)); btn.click(); return true; })()`);
-  await waitFor("the new chat", () => evalWeb("d.querySelectorAll('.msg').length === 0 && d.getElementById('profile').value === ':ask-me'"), 15000);
-  const asked = await evalWeb("({ footer: d.getElementById('meta').textContent.slice(0, 50), hint: d.getElementById('hint').textContent.slice(0, 40) })");
-  check("after confirming, the chat restarts with the :ask-me profile", /:ask-me/.test(asked.footer) || /ask-me/.test(asked.hint), JSON.stringify(asked));
+  await waitFor("the new chat", () => evalWeb("d.querySelectorAll('.msg').length === 0 && d.getElementById('modeLabel').textContent === 'Accept edits'"), 15000);
+  const asked = await evalWeb("({ footer: d.getElementById('meta').textContent.slice(0, 50), label: d.getElementById('modeLabel').textContent })");
+  check("after confirming, the chat restarts in Accept edits (:ask-me)", /:ask-me/.test(asked.footer) && asked.label === "Accept edits", JSON.stringify(asked));
   await shot("10-ask-me");
 
   // Narrow layout.

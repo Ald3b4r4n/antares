@@ -3,13 +3,16 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
+import { modeRows } from "../src/muse/modes.ts";
 import { chatHtml } from "../src/ui/chatHtml.ts";
 
 const port = Number(process.argv[2] ?? 5757);
 const mediaDir = new URL("../media/", import.meta.url);
 const types: Record<string, string> = { ".css": "text/css", ".js": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png" };
 
-const mock = await readFile(new URL("./preview-mock.js", import.meta.url), "utf8");
+// The real mode table, so the preview shows exactly what the extension offers.
+const mock = `window.__MODES = ${JSON.stringify(modeRows())};
+` + (await readFile(new URL("./preview-mock.js", import.meta.url), "utf8"));
 
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");

@@ -92,6 +92,10 @@ try {
   rec("result", "session/start", started);
   sessionId = started.session?.sessionId ?? "";
   if (!sessionId) throw new Error("no sessionId");
+  if (process.env.PROBE_APPROVAL_MODE) {
+    const changed = await host.request("session/setApprovalMode", { commandId: uuidv7(), sessionId, mode: process.env.PROBE_APPROVAL_MODE });
+    rec("result", "session/setApprovalMode", changed);
+  }
   console.log("Sending ONE real turn that should trigger a shell approval (it will be DENIED)...");
   setTimeout(resolveDone, 150_000);
   const ack = await host.request("turn/start", {
@@ -108,8 +112,14 @@ try {
   const code = await host.stop();
   const counts: Record<string, number> = {};
   for (const e of log) if (e.method && (e.kind === "notification" || e.kind === "serverRequest")) counts[e.method] = (counts[e.method] ?? 0) + 1;
-  const summary = { turnOutcome: terminal, approvalsSeen, decided, approvedAnything, hostExitCode: code, counts };
-  writeFileSync(new URL("probe-approval.json", outDir), JSON.stringify({ summary, log }, null, 2));
+  const tools = log
+    .filter((e) => e.method === "item/completed" && (e.payload as { item?: { kind?: string } })?.item?.kind === "toolCall")
+    .map((e) => {
+      const item = (e.payload as { item: { tool?: string; status?: string; failureReason?: string } }).item;
+      return { tool: item.tool, status: item.status, failureReason: item.failureReason };
+    });
+  const summary = { profile, approvalMode: process.env.PROBE_APPROVAL_MODE ?? "(profile default)", turnOutcome: terminal, approvalsSeen, decided, approvedAnything, tools, hostExitCode: code, counts };
+  writeFileSync(new URL(process.env.PROBE_LABEL ? `probe-approval-${process.env.PROBE_LABEL}.json` : "probe-approval.json", outDir), JSON.stringify({ summary, log }, null, 2));
   console.log(JSON.stringify(summary, null, 2));
   rmSync(work, { recursive: true, force: true });
 }

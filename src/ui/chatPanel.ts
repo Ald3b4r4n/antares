@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
+import { cycleMode, DEFAULT_MODE, modeById, modeOfProfile, modeRows } from "../muse/modes.ts";
 import { imageTypeFor, mentionFor, rootsFor } from "../muse/composer.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
 import { listMcpServers } from "../muse/mcp.ts";
@@ -24,7 +25,8 @@ type FromWebview =
   | { type: "unqueue"; turnId: string }
   | { type: "stop" }
   | { type: "newChat" }
-  | { type: "setProfile"; profileId: string }
+  | { type: "setMode"; modeId: string }
+  | { type: "cycleMode" }
   | { type: "refreshUsage" }
   | { type: "voice"; action: "toggle" | "cancel" | "setup" }
   | { type: "listSessions" }
@@ -127,7 +129,8 @@ export class ChatPanel {
     this.post({
       type: "config",
       profileId: this.profile,
-      profiles: PROFILES,
+      modeId: modeOfProfile(this.profile)?.id,
+      modes: modeRows(),
       modelId: this.modelId,
       effort: this.effort,
       usage: this.tracker.latest(),
@@ -210,8 +213,11 @@ export class ChatPanel {
       case "newChat":
         await this.restart(this.profile);
         break;
-      case "setProfile":
-        await this.setProfile(message.profileId);
+      case "setMode":
+        await this.setMode(message.modeId);
+        break;
+      case "cycleMode":
+        await this.setMode(cycleMode(modeOfProfile(this.profile)?.id ?? DEFAULT_MODE));
         break;
       case "voice":
         await this.voice.handle(message.action);
@@ -246,11 +252,11 @@ export class ChatPanel {
     }
   }
 
-  private async restart(profile: string): Promise<void> {
+  private async restart(profile: string, keepFolders = false): Promise<void> {
     await this.session?.stop();
     this.session = undefined;
     this.profile = profile;
-    this.extraRoots = []; // folders added to a chat end with it
+    if (!keepFolders) this.extraRoots = []; // folders added to a chat end with it
     this.post({ type: "reset" });
     this.postFolders();
     this.postConfig();
@@ -269,31 +275,36 @@ export class ChatPanel {
     }
   }
 
-  /** Continues a stored session, or (read-only chats only) a fork of it. Replaces the current chat. */
-  private async openStored(sessionId: string, mode: "resume" | "fork"): Promise<void> {
+  /**
+   * Continues a stored session, or (read-only chats only) a fork of it. Replaces the current chat. Returns
+   * whether the session is open. `keepFolders` is for a mode switch, which continues the same conversation.
+   */
+  private async openStored(sessionId: string, mode: "resume" | "fork", keepFolders = false): Promise<boolean> {
     if (this.session?.busy) {
       this.notice("warning", "Stop the current turn before opening another session.");
-      return;
+      return false;
     }
     if (mode === "fork" && this.profile !== READ_ONLY) {
       this.notice("warning", "A fork cannot be given a permission profile, so forking is only offered in Read-only chats. Switch this chat to Read-only first.");
-      return;
+      return false;
     }
     await this.session?.stop();
     this.session = undefined;
     this.currentSessionId = undefined;
-    this.extraRoots = [];
+    if (!keepFolders) this.extraRoots = [];
     this.post({ type: "reset" });
     this.postFolders();
     this.postConfig();
     const session = this.ensureSession(false, mode === "resume" ? { resumeSessionId: sessionId } : { forkSessionId: sessionId });
-    if (!session) return;
+    if (!session) return false;
     try {
       await session.start();
+      return true;
     } catch (error) {
       this.notice("error", `Could not ${mode === "resume" ? "continue" : "fork"} that session: ${error instanceof Error ? error.message : String(error)}`);
       await session.stop();
       if (this.session === session) this.session = undefined;
+      return false;
     }
   }
 
@@ -308,27 +319,62 @@ export class ChatPanel {
     }
   }
 
-  private async setProfile(profileId: string): Promise<void> {
-    if (!KNOWN_PROFILES.has(profileId) || profileId === this.profile) {
+  /**
+   * Switches the permission mode. A chat that has a stored session is continued under the new profile: the
+   * host is stopped and the same session resumed (verified: resume accepts the profile and the host reports
+   * it back), so the conversation is kept and the host-level tool limits follow the new mode. A live
+   * `session/setPermissionProfile` is not used because it is experimental and cannot lift the shell and
+   * write limits a read-only host was started with. With no stored session (nothing said yet, or the
+   * offline test provider) the chat simply restarts. Never while a turn runs.
+   */
+  private async setMode(modeId: string): Promise<void> {
+    const mode = modeById(modeId);
+    if (!mode) {
       this.postConfig();
       return;
     }
-    if (profileId !== READ_ONLY) {
-      const strong = profileId === ":unrestricted";
-      const detail = strong
-        ? "Per the Muse contract this profile starts without sandbox or approval prompts. The agent can then act with your user's permissions."
-        : "The agent may use shell and file-write tools. Read what the profile note says about what it does and does not ask for.";
+    if (!mode.profileId || mode.unavailable) {
+      this.notice("info", `${mode.label} mode is not available. ${mode.unavailable ?? ""}`.trim());
+      this.postConfig();
+      return;
+    }
+    if (mode.profileId === this.profile) {
+      this.postConfig();
+      return;
+    }
+    if (this.session?.busy) {
+      this.notice("warning", "Stop the current turn before switching the permission mode.");
+      this.postConfig();
+      return;
+    }
+    const resumable = this.currentSessionId !== undefined && !vscode.workspace.getConfiguration("antares").get<string>("dev.provider");
+    if (mode.confirm) {
+      const action = resumable ? "Switch mode" : "Start new chat";
       const choice = await vscode.window.showWarningMessage(
-        `Start a new chat with the ${profileId} profile?`,
-        { modal: true, detail: `${detail}\n\nSwitching profile ends the current chat.` },
-        "Start new chat",
+        `Switch to ${mode.label} (${mode.profileId})?`,
+        { modal: true, detail: `${mode.note}
+
+${resumable ? "Muse is restarted and this conversation continues under the new mode." : "Switching mode ends the current chat."}` },
+        action,
       );
-      if (choice !== "Start new chat") {
+      if (choice !== action) {
         this.postConfig();
         return;
       }
     }
-    await this.restart(profileId);
+    if (!resumable) {
+      await this.restart(mode.profileId, true);
+      return;
+    }
+    const before = this.profile;
+    this.profile = mode.profileId;
+    if (await this.openStored(this.currentSessionId!, "resume", true)) {
+      this.notice("info", `Switched to ${mode.label} (${mode.profileId}). The conversation continued from Muse's stored history.`);
+    } else {
+      this.profile = before; // the old mode is what the next message would use
+      this.notice("warning", `The mode is still ${modeOfProfile(before)?.label ?? before}. The earlier conversation is in History.`);
+    }
+    this.postConfig();
   }
 
   private async decide(message: Extract<FromWebview, { type: "decide" }>): Promise<void> {

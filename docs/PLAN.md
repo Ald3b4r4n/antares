@@ -43,19 +43,21 @@ Chat com streaming, copiar/colar, imagens (colar, soltar, anexar), perfil por ch
 
 Verificado: 15 testes unitários novos (112 no total), host real com provedor echo (parte `skill`, `workspaceRoots` canônico, `@arquivo`), e janela real no VS Code 1.143.1 e no Antigravity IDE 1.107.0 (32 checagens cada, sem chamada de modelo). A fila só foi vista no host falso, no preview e com o host real em chamadas `turn/start` seguidas; um turno do provedor echo termina rápido demais para a janela real.
 
-### 2C. Modos de permissão (inspirado na primeira captura)
+### 2C. Modos de permissão (pronta, com uma ressalva; inspirada na primeira captura)
 
-Seletor com atalhos 1 a 5 e ciclo por Shift+Tab, mudando **sem perder a conversa**. O que o Muse realmente tem: quatro perfis e quatro modos de aprovação (`allowAll`, `promptUnmatched`, `onRequest`, `denyUnmatched`), trocados no meio da sessão por `session/setApprovalMode` (estável) e `session/setPermissionProfile` (experimental). Mapeamento proposto, **a confirmar por probes antes de ser prometido**:
+Seletor ao lado do modelo (botão com o modo atual), atalhos 1 a 5 no menu aberto e Shift+Tab no campo para percorrer. **Sem perder a conversa**: o chat é continuado sob o novo perfil. O que o Muse realmente tem: quatro perfis de permissão e quatro modos de aprovação. Mapeamento **observado** (probes `scripts/probe-modes.ts`, `probe-resume-profile.ts`, `probe-approval.ts` com `PROBE_APPROVAL_MODE`):
 
-| Modo na interface | Base no Muse | Estado do mapeamento |
+| Modo na interface | Base no Muse | Estado |
 |---|---|---|
-| **Automático** (revisor decide, escala para você) | perfil `:auto-review` | Nunca exercitado no host real |
-| **Manual** (pergunta antes de agir) | `:ask-me` + modo de aprovação mais estrito | Observado: `:ask-me` **não** pergunta por escrita no workspace; precisa de um modo mais estrito, a descobrir |
-| **Aceitar edições** | Não existe como tal. Hoje o `:ask-me` já aceita escrita no workspace. Alternativa do lado da Antares: escolher "permitir na sessão" só para escrita no workspace, **nunca** shell ou rede | A Antares nunca decide sozinha; seria uma política escolhida pelo usuário, limitada e visível. Precisa observar pedidos de acesso a arquivo |
-| **Plano** (planejar antes de alterar) | Não existe como tal. Do lado da Antares: perfil `:read-only` + pedido de plano, e um botão "aprovar plano" que troca o modo | Fluxo da Antares, não do Muse |
-| **Ignorar permissões** | `:unrestricted` | Aviso forte e confirmação, como hoje. O sandbox do `muse serve` já foi visto indisponível |
+| **Auto** | perfil `:auto-review` (revisor automático decide primeiro e escala para você; mesmo acesso do Ask me, segundo a descrição do host) | Disponível. O revisor nunca foi exercitado com um turno real |
+| **Manual** | Não existe. Observado: com `:ask-me` e o modo de aprovação `promptUnmatched`, uma escrita no workspace **rodou sem pedir aprovação** (`write_file` concluída, 0 pedidos). O modo de aprovação não é uma chave "mais estrita"; quem decide o que pede é o perfil | **Indisponível**, mostrado desabilitado com o motivo (e não simulado). Quem quer impedir alterações usa Plan |
+| **Accept edits** | `:ask-me` (edita o workspace e temporários sem pedir; pede para escritas protegidas, rede nova e ações restritas, segundo a descrição do host). Observado: shell e rede pediram, escrita no workspace não | Disponível. É o que a captura chama de "aceitar edições" |
+| **Plan** | `:read-only` (só leitura; a Antares também sobe o host sem as ferramentas de shell e escrita) | Disponível, é o padrão. Mostra um aviso com o botão "Switch to Accept edits" para executar o plano. Dica: a skill embutida `/plan` |
+| **Bypass permissions** | `:unrestricted` (sem sandbox e sem pedidos de aprovação; comandos com rede direta) | Disponível com confirmação que diz isso. **Nunca** entra no ciclo do Shift+Tab |
 
-Trocar de perfil no meio do chat: hoje reinicia o chat. A alternativa verificada é parar a sessão e **retomá-la com o novo perfil** (o `resume` aceita `permissionProfile`), preservando o histórico; a troca ao vivo por `setPermissionProfile` exige o modo experimental.
+Como a troca funciona: `session/setPermissionProfile` (experimental) existe e funciona ao vivo (os quatro perfis foram trocados e o host devolveu os eixos novos), mas **não** tira os limites de shell e escrita com que um host `:read-only` foi iniciado, e exigiria negociar a API experimental no host do chat. Por isso a Antares **para o host e retoma a mesma sessão** com o novo perfil e as flags certas (`session/resume` aceita `permissionProfile`; verificado com os quatro perfis, inclusive sessão sem turnos). O histórico volta inline e é redesenhado; as pastas adicionadas continuam. Não se troca durante um turno. Sem sessão guardada (nada dito ainda, ou provedor de teste) o chat só reinicia. Confirmação para tudo acima de Plan.
+
+Verificado: 7 testes unitários novos (119 no total); host real sem turno (troca ao vivo, retomada com cada perfil, `session/read`); **um** turno real com `:ask-me` + `promptUnmatched` (escrita em pasta descartável, nada aprovado); janela real no VS Code 1.143.1 e no Antigravity IDE 1.107.0: 32 checagens do fluxo com o provedor de teste e 15 do fluxo com o host real (sessão aberta, Plan para Accept edits com diálogo, retomada, Shift+Tab de volta para Plan, Bypass pedindo confirmação e cancelado). **Não verificado:** a troca com uma conversa que já tenha turnos (usa o mesmo caminho do histórico, mas não foi exercitada), e o comportamento do `:auto-review` em turnos reais.
 
 ## Fase 3: conectores, navegador e imagens
 

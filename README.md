@@ -20,7 +20,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: phase 1 done; phase 2 under way (voice input on Windows and the composer "+" menu are done; permission modes are next).** Chat with streaming, tool-call cards, an approval UI, a per-chat permission profile, a model and reasoning-effort picker, image input, subscription-usage alerts, and a session history work. Approvals were checked against the real host (network and shell requests, allowed once and rejected, in the real editor window). See the [roadmap](#roadmap).
+> **Status: phase 1 done; phase 2 under way (voice input on Windows and the composer "+" menu are done; the permission-mode selector is done; phase 3, connectors, browser and images, is next).** Chat with streaming, tool-call cards, an approval UI, a per-chat permission profile, a model and reasoning-effort picker, image input, subscription-usage alerts, and a session history work. Approvals were checked against the real host (network and shell requests, allowed once and rejected, in the real editor window). See the [roadmap](#roadmap).
 
 > **Unofficial.** Antares is an independent community project. It is not made, endorsed or supported by Meta or the Muse Code team. "Muse" and "Muse Code" belong to their owners.
 
@@ -32,7 +32,8 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 
 - It **launches the official `muse serve`** as a child process and speaks MSP (JSON-RPC 2.0, one JSON object per line over stdio).
 - It **does not** read your `auth.json`, call the key-minting endpoint, or call the model API on its own. Your subscription stays attached to the official client; login happens through the host (device code flow) when that phase lands.
-- It **starts every chat in the `:read-only` profile** with shell and file-write tools also disabled at the host. You can pick another profile in the header (setting `antares.initialProfile` sets the default); that starts a new chat and asks for confirmation. The profile and the sandbox state the host reports are always shown. Antares never decides an approval by itself.
+- It **starts every chat in Plan mode**, which is Muse's `:read-only` profile, with shell and file-write tools also disabled at the host. You choose another mode with the selector next to the model picker (setting `antares.initialProfile` sets the starting profile). Anything above Plan asks for confirmation that says what it grants, and the chat continues under the new profile instead of starting over. The mode and the sandbox state the host reports are always shown. Antares never decides an approval by itself.
+- **The modes are Muse's profiles, named for what they do:** Auto is `:auto-review`, Accept edits is `:ask-me` (workspace edits run without asking; shell, network and other restricted actions ask), Plan is `:read-only`, Bypass permissions is `:unrestricted` (no sandbox, no prompts; never reached by Shift+Tab). **Manual (ask before every edit) is not offered**, because Muse has no such profile; Antares says so instead of pretending.
 - **A ready sandbox check is not an active sandbox.** In testing, `muse sandbox windows check` said `ready` while `muse serve` reported the sandbox unavailable and the shell tool failed closed. Antares shows what the host reports for the session.
 - It **does not bundle or redistribute** Muse or its schemas. Protocol types are generated from the `muse` you have installed (`muse schema generate-json-schema`).
 
@@ -44,7 +45,7 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only, model and reasoning-effort picker (catalog shown before the first message, choice remembered), image input (paste, drop or the + menu; PNG verified against the real host), subscription usage (5 h and weekly windows with "as of", threshold alerts, status bar, local token ledger), session history (continue or fork a stored session of the open folder, with the conversation redrawn). **Phase 1 feature list complete and checked in the real editors, including real approvals.** Not yet seen: file-access and Unix-socket approvals, multi-stage approvals from the real host (handled and tested against a fake one), and `:auto-review`. | **Done** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
 | 2A | **Done (Windows):** voice input. Microphone button, **local** transcription with faster-whisper (recommended) or Windows speech recognition; the text lands in the box for review and nothing is sent by itself. See [docs/VOICE.md](docs/VOICE.md). Recording on macOS and Linux is not implemented yet | **Done** |
 | 2B | **Done:** composer "+" menu. Add files or photos (Ctrl+U; photos attach, other files become `@path` mentions because Muse has no file part), add a folder (asks first), slash commands from Muse's own skills (`/` opens the palette), read-only lists of connectors and plugins, and a queue: while a turn runs, Enter steers it and Ctrl+Enter queues the message (with a Remove button). Managing connectors and plugins is 3A | **Done** |
-| 2C | Permission modes selector (Automatic, Manual, Accept edits, Plan, Ignore permissions) that switches without losing the conversation. Mapped onto Muse's profiles and approval modes; "Accept edits" and "Plan" exist only on Antares' side and are explicit user choices | Planned: the mapping is confirmed by probes first |
+| 2C | **Done, with one limit:** permission mode selector (Auto, Manual, Accept edits, Plan, Bypass permissions) next to the model picker. Shift+Tab cycles, 1 to 5 pick in the open menu, and switching **continues the same conversation** under the new Muse profile. **Manual is shown as unavailable**: Muse has no profile that asks before every edit (observed: a workspace write ran without a prompt even in its strictest prompting mode) | **Done** |
 | 3A | Connectors (MCP servers), plugins, hooks | Planned |
 | 3B | Web and browser: reading the web already works with per-domain approvals; browser *control* through an MCP browser server the user configures, plus Computer Use approval cards if the host sends them (the host's own Computer Use is described for macOS only) | Planned |
 | 3C | Show images in the chat: images the model saw (tool captures) and workspace image files. **Model-generated images only if the host delivers them; the contract says nothing about image output** | Planned |
@@ -110,6 +111,8 @@ This launches the editor for real, with Antares loaded as a development extensio
 
 With `E2E_REAL=1` it instead uses your own Muse login and runs a **real model turn that triggers a real approval** in the real window (`E2E_DECISION=allow` allows one fetch of `example.com` and nothing else; `E2E_DECISION=reject` rejects everything, with a note). It costs a real turn each time, and it starts your configured hooks. Both decisions passed every approval check on VS Code 1.143.1 (the one other failure on the first run was a wrong expectation about the status-bar text, since fixed).
 
+With `E2E_MODES=1` it uses the real `muse serve` of your machine in an isolated config (no login, **no model call**): it opens a session and switches the permission mode through the real UI, checking that the session continues under the new profile (Plan to Accept edits with its confirmation, Shift+Tab back, and Bypass asking and being cancelled). Passing on both editors.
+
 Not covered: dropping files from the operating system onto the panel, and file-access, Unix-socket and multi-stage approvals from the real host.
 
 ## Project layout
@@ -120,6 +123,7 @@ src/muse/session.ts   one chat session over one host (turns, interrupt, approval
 src/muse/events.ts    maps raw MSP notifications to the events the UI shows
 src/muse/usage.ts     alert thresholds, token ledger, one-shot usage refresh
 src/muse/images.ts    image input validation and turn input parts
+src/muse/modes.ts     the permission modes and the Muse profile each one maps to
 src/muse/composer.ts  the + menu: skills, @mentions, canonical roots, plugin and connector rows
 src/muse/mcp.ts       connector list on a short-lived experimental host
 src/muse/sessions.ts  session rows, folder matching and history replay

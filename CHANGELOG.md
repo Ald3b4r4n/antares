@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — phase 2C: permission modes
+
+- A mode selector next to the model picker replaces the header's profile dropdown: **Auto** (`:auto-review`), **Manual** (unavailable), **Accept edits** (`:ask-me`), **Plan** (`:read-only`, the default) and **Bypass permissions** (`:unrestricted`). Keys 1 to 5 pick in the open menu; Shift+Tab in the message box cycles Auto, Accept edits and Plan and never lands on Bypass.
+- Switching continues the conversation: the host is stopped and the same session is resumed under the new profile (with the host-level shell and write limits following the mode). Anything above Plan asks first and says what it grants; Plan does not. It is refused while a turn runs. With no stored session (nothing said yet, or the offline test provider) the chat restarts instead. Folders added through the "+" menu are kept.
+- Manual is shown disabled with the reason, not simulated: Muse has no profile that asks before every edit.
+- Plan mode shows a note with a button that switches to Accept edits to carry out the plan.
+- Findings (docs/PROTOCOL-NOTES.md): the four approval modes select fine but do not make a stricter profile; live `session/setPermissionProfile` works but cannot lift a read-only host's tool flags; resume under any of the four profiles works.
+- Probes: `scripts/probe-modes.ts`, `scripts/probe-resume-profile.ts`, `scripts/probe-approval.ts` (now takes `PROBE_APPROVAL_MODE` and `PROBE_LABEL`).
+- Checked: 7 new unit tests (119 in total), and in VS Code 1.143.1 and Antigravity IDE 1.107.0 both the echo-provider flow (32 checks) and `E2E_MODES=1`, the real host with no model call (15 checks).
+- Not done: switching mid-conversation after real turns was not exercised; `:auto-review` was not run with a real turn.
+
 ## Unreleased — phase 2B: composer "+" menu
 
 - A "+" button replaces the attach button and opens a menu: **Add files or photos** (Ctrl+U), **Add folder**, **Slash commands**, **Connectors**, **Plugins**.

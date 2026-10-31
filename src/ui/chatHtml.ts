@@ -23,8 +23,6 @@ export function chatHtml(options: ChatHtmlOptions): string {
 <header>
   <span class="title"><b>✦</b> Antares</span>
   <span class="header-right">
-    <label class="profile-label" for="profile">Profile</label>
-    <select id="profile" title="Permission profile for this chat. Changing it starts a new chat."></select>
     <button id="historyBtn" class="link" title="Continue or fork a stored session of this folder">History</button>
     <button id="newChat" class="link">New chat</button>
   </span>
@@ -56,6 +54,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
 <footer>
   <div id="meta"></div>
   <div class="controls">
+    <button id="modeBtn" class="mode-btn" aria-haspopup="menu" aria-expanded="false" title="Permission mode. Click, or press Shift+Tab in the message box to cycle."><span class="mode-dot" aria-hidden="true"></span><span id="modeLabel">Plan</span><span aria-hidden="true">▾</span></button>
     <label for="model">Model</label>
     <select id="model" title="Model for this chat. Takes effect on the next message."></select>
     <label for="effort">Effort</label>
@@ -64,6 +63,8 @@ export function chatHtml(options: ChatHtmlOptions): string {
   </div>
   <ul id="pending" class="pending" aria-label="Queued messages" hidden></ul>
   <div id="folders" class="folders" aria-label="Folders added to this chat" hidden></div>
+  <div id="modeMenu" class="menu mode-menu" role="menu" aria-label="Permission mode" hidden></div>
+  <div id="modeNote" class="mode-note" hidden><span id="modeNoteText"></span> <button id="modeNoteGo" class="link tiny" hidden></button></div>
   <div id="attachments" class="attachments" hidden></div>
   <div id="voiceStatus" class="voice-status" role="status" aria-live="polite" hidden></div>
   <div id="slashMenu" class="slash-menu" role="listbox" aria-label="Skills" hidden></div>

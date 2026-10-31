@@ -7,7 +7,9 @@
   const sendBtn = $("send");
   const stopBtn = $("stop");
   const meta = $("meta");
-  const profileSel = $("profile");
+  const modeBtn = $("modeBtn");
+  const modeMenu = $("modeMenu");
+  const modeNote = $("modeNote");
   const hint = $("hint");
   const modelSel = $("model");
   const effortSel = $("effort");
@@ -64,7 +66,8 @@
     turnNote: "",
     statusText: "Ready",
     profileId: undefined,
-    profiles: [],
+    modes: [], // the permission modes the extension offers, with the profile each one starts
+    modeId: undefined,
     sandbox: undefined,
   };
 
@@ -399,31 +402,96 @@
     renderMeta();
   }
 
-  // ---- profile ----
+  // ---- permission mode ----
+  const currentMode = () => state.modes.find((m) => m.id === state.modeId);
   function applyConfig(msg) {
     state.profileId = msg.profileId;
-    state.profiles = msg.profiles || [];
+    state.modeId = msg.modeId;
+    state.modes = msg.modes || [];
     state.modelId = msg.modelId;
     state.effort = msg.effort;
     if (msg.usage) state.usage = msg.usage;
     if (msg.ledger) state.ledger = msg.ledger;
     if (Array.isArray(msg.thresholds) && msg.thresholds.length) state.thresholds = msg.thresholds;
     renderModelControls();
-    profileSel.replaceChildren();
-    for (const p of state.profiles) {
-      const opt = el("option", "", p.label + " (" + p.id + ")");
-      opt.value = p.id;
-      profileSel.append(opt);
-    }
-    profileSel.value = state.profileId;
-    const current = state.profiles.find((p) => p.id === state.profileId);
-    hint.textContent = (current ? "Profile " + current.id + ": " + current.note + " " : "") + "Enter sends · Shift+Enter adds a line · / for skills · Ctrl+U adds files · paste or drop images.";
+    renderModes();
+    hint.textContent = "Enter sends · Shift+Enter adds a line · Shift+Tab changes the mode · / for skills · Ctrl+U adds files · paste or drop images.";
     renderMeta();
   }
-  profileSel.addEventListener("change", () => {
-    const wanted = profileSel.value;
-    profileSel.value = state.profileId; // stays put until the extension confirms with a new config
-    vscode.postMessage({ type: "setProfile", profileId: wanted });
+  function renderModes() {
+    const mode = currentMode();
+    $("modeLabel").textContent = mode ? mode.label : state.profileId || "Mode";
+    modeBtn.title = (mode ? mode.label + " (" + state.profileId + "): " + mode.note + " · " : "") + "Click to choose a mode, or press Shift+Tab in the message box to cycle.";
+    modeBtn.classList.toggle("risky", !!mode && mode.id === "bypass");
+    modeBtn.classList.toggle("elevated", !!mode && (mode.id === "auto" || mode.id === "acceptEdits"));
+    modeMenu.replaceChildren();
+    for (const m of state.modes) {
+      const item = el("button", "menu-item mode-item" + (m.unavailable ? " unavailable" : "") + (m.id === state.modeId ? " current" : ""));
+      item.setAttribute("role", "menuitem");
+      item.dataset.mode = m.id;
+      item.title = m.unavailable ? m.note + " " + m.unavailable : m.note;
+      const text = el("span", "mode-text");
+      text.append(el("span", "mode-name", (m.id === state.modeId ? "✓ " : "") + m.label), el("span", "mode-short", m.short));
+      item.append(text, el("kbd", "", String(m.shortcut)));
+      modeMenu.append(item);
+    }
+    // Plan is a way to look before acting: offer the step that carries the plan out.
+    const accept = state.modes.find((m) => m.id === "acceptEdits");
+    const inPlan = state.modeId === "plan" && !!accept && !accept.unavailable;
+    modeNote.hidden = !inPlan;
+    if (inPlan) {
+      $("modeNoteText").textContent = "Plan mode: Muse can read but not change anything. Ask for a plan (try /plan), then carry it out in Accept edits.";
+      const go = $("modeNoteGo");
+      go.hidden = false;
+      go.textContent = "Switch to Accept edits";
+      go.onclick = () => vscode.postMessage({ type: "setMode", modeId: "acceptEdits" });
+    }
+  }
+  const modeItems = () => [...modeMenu.querySelectorAll(".menu-item")];
+  function openModeMenu() {
+    closeMenus();
+    modeMenu.hidden = false;
+    modeBtn.setAttribute("aria-expanded", "true");
+    const current = modeItems().find((i) => i.classList.contains("current")) || modeItems()[0];
+    if (current) current.focus();
+  }
+  function closeModeMenu() {
+    modeMenu.hidden = true;
+    modeBtn.setAttribute("aria-expanded", "false");
+  }
+  function chooseMode(id) {
+    closeModeMenu();
+    vscode.postMessage({ type: "setMode", modeId: id });
+    input.focus();
+  }
+  modeBtn.addEventListener("click", () => (modeMenu.hidden ? openModeMenu() : closeModeMenu()));
+  modeMenu.addEventListener("click", (ev) => {
+    const item = ev.target.closest(".menu-item");
+    if (item) chooseMode(item.dataset.mode);
+  });
+  modeMenu.addEventListener("keydown", (ev) => {
+    const items = modeItems();
+    const at = items.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      items[(at + 1) % items.length].focus();
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      items[(at - 1 + items.length) % items.length].focus();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeModeMenu();
+      modeBtn.focus();
+    } else if (/^[1-9]$/.test(ev.key)) {
+      const m = state.modes.find((x) => x.shortcut === Number(ev.key));
+      if (m) {
+        ev.preventDefault();
+        chooseMode(m.id);
+      }
+    }
+  });
+  document.addEventListener("click", (ev) => {
+    if (!modeMenu.hidden && !modeMenu.contains(ev.target) && !modeBtn.contains(ev.target)) closeModeMenu();
   });
 
   // ---- events from the extension ----
@@ -794,6 +862,7 @@
   // ---- the "+" menu ----
   const menuItems = () => [...plusMenu.querySelectorAll(".menu-item")];
   function closeMenus() {
+    closeModeMenu();
     plusMenu.hidden = true;
     plusBtn.setAttribute("aria-expanded", "false");
     closeSlash();
@@ -1172,6 +1241,11 @@
         closeSlash();
         return;
       }
+    }
+    if (ev.key === "Tab" && ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
+      ev.preventDefault();
+      vscode.postMessage({ type: "cycleMode" });
+      return;
     }
     if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
