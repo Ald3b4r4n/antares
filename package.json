@@ -5,6 +5,10 @@
   "version": "0.0.1",
   "publisher": "ald3b4r4n",
   "license": "MIT",
+  "icon": "media/antares.png",
+  "repository": { "type": "git", "url": "https://github.com/Ald3b4r4n/antares.git" },
+  "homepage": "https://github.com/Ald3b4r4n/antares",
+  "bugs": { "url": "https://github.com/Ald3b4r4n/antares/issues" },
   "private": true,
   "type": "module",
   "engines": {

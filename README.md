@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/antares.svg" alt="Antares" width="96">
+  <img src="media/antares.png" alt="Antares" width="96">
 </p>
 
 ```text
