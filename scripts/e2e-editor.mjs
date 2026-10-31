@@ -50,7 +50,15 @@ const patchFile = join(work, "tool-outputs", "t1", "call_1-tool_patch.json");
 mkdirSync(join(work, "tool-outputs", "t1"), { recursive: true });
 writeFileSync(join(workspace, "plan.txt"), "alpha\nBETA\ngamma\n");
 writeFileSync(patchFile, JSON.stringify({ files: [{ path: join(workspace, "plan.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] }));
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+// Two successive edits of one file for the cumulative "Changes" check: before them it was one/two/three.
+mkdirSync(join(work, "tool-outputs", "t2"), { recursive: true });
+mkdirSync(join(work, "tool-outputs", "t3"), { recursive: true });
+writeFileSync(join(workspace, "series.txt"), "one\nTWO\nthree\nfour\n");
+const seriesA = join(work, "tool-outputs", "t2", "call_2-tool_patch.json");
+const seriesB = join(work, "tool-outputs", "t3", "call_3-tool_patch.json");
+writeFileSync(seriesA, JSON.stringify({ files: [{ path: join(workspace, "series.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" one", "-two", "+TWO", " three"] }] }] }));
+writeFileSync(seriesB, JSON.stringify({ files: [{ path: join(workspace, "series.txt"), hunks: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 2, lines: [" three", "+four"] }] }] }));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.dev.patchSeries": [seriesA, seriesB], "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 // Images for the workspace-image check: one inside the workspace, one outside it (a real 1x1 PNG each).
 const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
@@ -247,12 +255,12 @@ try {
   if (!MODES && !REAL && !IMPORT && !PLUGINS) {
     // Tool presentation: a checklist instead of JSON, and a file edit as a diff with buttons to open VS Code's diff.
     await waitFor("the demo tool cards", () => evalWeb("d.querySelectorAll('.tool').length >= 2 && d.querySelectorAll('.patch-line').length > 0"), 20000);
-    const cards = await evalWeb("({ todos: [...d.querySelectorAll('.todo')].map(x => x.className.replace('todo ', '') + ':' + x.querySelector('.todo-text').textContent), todoSummary: d.querySelector('.tool .tool-summary').textContent, edit: { summary: [...d.querySelectorAll('.tool-summary')].pop().textContent, changed: d.querySelector('.patch-head .tool-changed')?.textContent, lines: [...d.querySelectorAll('.patch-line')].map(x => x.className.replace('patch-line ', '') + ':' + x.textContent), buttons: [...d.querySelectorAll('.patch-head button')].map(b => b.textContent) } })");
+    const cards = await evalWeb("({ todos: [...d.querySelectorAll('.todo')].map(x => x.className.replace('todo ', '') + ':' + x.querySelector('.todo-text').textContent), todoSummary: d.querySelector('.tool .tool-summary').textContent, edit: (() => { const p = [...d.querySelectorAll('.tool')].find(c => c.querySelector('.tool-summary')?.textContent === 'plan.txt'); return { summary: p.querySelector('.tool-summary').textContent, changed: p.querySelector('.patch-head .tool-changed')?.textContent, lines: [...p.querySelectorAll('.patch-line')].map(x => x.className.replace('patch-line ', '') + ':' + x.textContent), buttons: [...p.querySelectorAll('.patch-head button')].map(b => b.textContent) }; })() })");
     check("write_todos shows a checklist with done and in-progress items, not JSON", JSON.stringify(cards.todos) === JSON.stringify(["completed:Create plan.txt", "inProgress:Change line 2 to BETA"]) && cards.todoSummary === "2 tasks, 1 done", JSON.stringify({ todos: cards.todos, summary: cards.todoSummary }));
     check("edit_file shows the file relative to the workspace, the counts and the host's diff lines", cards.edit.summary === "plan.txt" && cards.edit.changed === "+1 \u22121" && JSON.stringify(cards.edit.lines) === JSON.stringify(["ctx: alpha", "del:-beta", "add:+BETA", "ctx: gamma"]), JSON.stringify(cards.edit));
     check("the diff card offers Open diff and Open file for a file inside the workspace", JSON.stringify(cards.edit.buttons) === JSON.stringify(["Open diff", "Open file"]), JSON.stringify(cards.edit.buttons));
     await shot("26-tool-cards");
-    await evalWeb("(() => { [...d.querySelectorAll('.patch-head button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
+    await evalWeb("(() => { const p = [...d.querySelectorAll('.tool')].find(c => c.querySelector('.tool-summary')?.textContent === 'plan.txt'); [...p.querySelectorAll('.patch-head button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
     const diffTab = await waitFor("VS Code's diff editor", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
     check("Open diff opens VS Code's diff editor on the file before and after the edit", /plan\.txt \(before/.test(diffTab), JSON.stringify(diffTab));
     await waitFor("the diff editor to paint its lines", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 0 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
@@ -260,6 +268,22 @@ try {
     check("the before side was rebuilt from the patch (beta) and the after side is the file (BETA)", sides.original.some((l) => /beta/.test(l)) && !sides.original.some((l) => /BETA/.test(l)) && sides.modified.some((l) => /BETA/.test(l)), JSON.stringify(sides));
     await shot("27-diff-editor");
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
+
+    // Every file changed in this chat: one row per file with the totals, and one diff from before the first edit.
+    await waitFor("the Changes button", () => evalWeb("!d.getElementById('changesBtn').hidden && d.getElementById('changesBtn').textContent === 'Changes (2)'"), 15000);
+    await evalWeb("(() => { d.getElementById('changesBtn').click(); return true; })()");
+    const changes = await evalWeb("({ title: d.getElementById('extrasTitle').textContent, status: d.getElementById('extrasStatus').textContent, rows: [...d.querySelectorAll('#extrasList li')].map(li => li.querySelector('.session-title').textContent + ' | ' + li.querySelector('.session-meta').textContent) })");
+    check("the Changes panel lists each changed file once, with its edits and totals", changes.title === "Changes in this chat" && /2 files changed in 3 edits/.test(changes.status) && changes.rows.some((r) => r === "plan.txt | 1 edit · +1 \u22121") && changes.rows.some((r) => r === "series.txt | 2 edits · +2 \u22121"), JSON.stringify(changes));
+    await shot("34-changes-panel");
+    await evalWeb("(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => /series.txt/.test(x.textContent)); [...li.querySelectorAll('button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
+    const seriesTab = await waitFor("the cumulative diff editor", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before this chat/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
+    check("Open diff on a file edited twice compares it before the first edit with now", /series\.txt \(before this chat .* now, 2 edits\)/.test(seriesTab), JSON.stringify(seriesTab));
+    await waitFor("the cumulative diff to paint", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 0 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
+    const seriesSides = await evalPage("(() => ({ original: [...document.querySelectorAll('.monaco-diff-editor .editor.original .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')), modified: [...document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')) }))()");
+    check("the before side holds the original lines (two, no four) and the after side the final ones (TWO, four)", seriesSides.original.some((l) => /two/.test(l)) && !seriesSides.original.some((l) => /four|TWO/.test(l)) && seriesSides.modified.some((l) => /TWO/.test(l)) && seriesSides.modified.some((l) => /four/.test(l)), JSON.stringify(seriesSides));
+    await shot("35-cumulative-diff");
+    await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before this chat/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
+    await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
 
     // Browser and Computer Use approvals: a synthetic request through the real page and CSP. The window title is
     // hostile on purpose (markup in the page's own words must stay text), and the host is not plain ASCII.

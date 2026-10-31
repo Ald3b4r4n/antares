@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { mapNotification } from "../../src/muse/events.ts";
-import { countChanges, normalizeHostPath, parsePatch, patchRefAllowed, readPatch, relativeToRoots, reversePatch } from "../../src/muse/patches.ts";
+import { countChanges, normalizeHostPath, parsePatch, patchRefAllowed, readPatch, relativeToRoots, reversePatch, reverseSeries } from "../../src/muse/patches.ts";
 
 const observedWrite = { files: [{ path: "\\\\?\\C:\\work\\plan.txt", hunks: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 3, lines: ["+alpha", "+beta", "+gamma"] }] }] };
 const observedEdit = { files: [{ path: "\\\\?\\C:\\work\\plan.txt", hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] };
@@ -146,4 +146,23 @@ test("tool calls: other tools keep the plain summary and gain no extra fields", 
     assert.equal("file" in e, false);
     assert.equal("patchRef" in e, false);
   }
+});
+
+// Three successive edits of one file, as separate patches: create it, change line 2, append a line.
+const e1 = [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 3, lines: ["+one", "+two", "+three"] }];
+const e2 = [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" one", "-two", "+TWO", " three"] }];
+const e3 = [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 2, lines: [" three", "+four"] }];
+
+test("series: the file before a whole run of edits is rebuilt from the file as it is now", () => {
+  assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e2, e3]), "one\ntwo\nthree\n", "two edits undone, latest first");
+  assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e1, e2, e3]), "", "a file created in the series goes back to empty");
+  assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e3]), "one\nTWO\nthree\n", "one edit");
+  assert.equal(reverseSeries("anything\n", []), "anything\n", "no edits: nothing to undo");
+});
+
+test("series: a file that changed outside the chat, or an edit that is missing, gives no false 'before'", () => {
+  assert.equal(reverseSeries("one\nTWO\nTHREE\nfour\n", [e2, e3]), undefined, "a line inside the region an edit touched was changed since");
+  assert.equal(reverseSeries("one\nTWO\nthree\nfour\nfive\n", [e2, e3]), "one\ntwo\nthree\nfive\n", "a change elsewhere in the file is kept: only the chat's edits are undone");
+  assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e1, e3]), undefined, "the middle edit is missing: undoing e3 then e1 does not fit");
+  assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e3, e2]), "one\ntwo\nthree\n", "edits to different lines commute, so the order does not change the answer");
 });

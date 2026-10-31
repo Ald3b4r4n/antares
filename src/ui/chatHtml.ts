@@ -60,6 +60,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <select id="model" title="Model for this chat. Takes effect on the next message."></select>
     <label for="effort">Effort</label>
     <select id="effort" title="Reasoning effort sent with each message"></select>
+    <button id="changesBtn" class="link tiny" hidden title="Every file changed in this chat, with one diff per file from before the first edit">Changes</button>
     <button id="refreshUsage" class="link tiny" title="Read fresh subscription usage from Muse (no model call; at most one read per minute)">↻ Usage</button>
   </div>
   <ul id="pending" class="pending" aria-label="Queued messages" hidden></ul>

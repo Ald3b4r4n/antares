@@ -125,6 +125,18 @@ export function reversePatch(current: string, hunks: readonly PatchHunk[]): stri
   return result.join("\n") + (endsWithNewline || lines.length === 0 ? "\n" : "");
 }
 
+/**
+ * Rebuilds a file as it was before a whole series of edits, from the file as it is now: the latest edit is undone
+ * first, then the one before it, and so on. `edits` are the hunks of each edit, oldest first. If any step does not
+ * match what is on disk (the file was changed outside the chat, or an edit is missing) the answer is undefined:
+ * a "before" that was guessed would be a false one.
+ */
+export function reverseSeries(current: string, edits: readonly (readonly PatchHunk[])[]): string | undefined {
+  let text: string | undefined = current;
+  for (let i = edits.length - 1; i >= 0 && text !== undefined; i--) text = reversePatch(text, edits[i]!);
+  return text;
+}
+
 /** Added and removed line counts of one file's hunks. */
 export function countChanges(file: PatchFile): { added: number; removed: number } {
   let added = 0;

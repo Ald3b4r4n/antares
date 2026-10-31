@@ -181,6 +181,12 @@
           "default": "",
           "markdownDescription": "Development only: path of a host patch file (`*-tool_patch.json` under a `tool-outputs` folder). When set, the panel shows a todo list and an `edit_file` call for that patch as soon as it opens, so the diff view can be checked without a model turn."
         },
+        "antares.dev.patchSeries": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Development only: patch files for successive edits of one file, shown in order, so the cumulative diff can be checked without a model turn."
+        },
         "antares.dev.picks": {
           "type": "array",
           "items": { "type": "string" },

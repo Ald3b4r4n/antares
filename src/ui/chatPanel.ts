@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
 import { cycleMode, DEFAULT_MODE, modeById, modeOfProfile, modeRows } from "../muse/modes.ts";
 import { canonicalPath, imageTypeFor, mentionFor, rootsFor } from "../muse/composer.ts";
-import { countChanges, normalizeHostPath, readPatch, relativeToRoots, reversePatch, type PatchFile } from "../muse/patches.ts";
+import { countChanges, normalizeHostPath, readPatch, relativeToRoots, reversePatch, reverseSeries, type PatchFile } from "../muse/patches.ts";
 import type { OriginalProvider } from "./originalProvider.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
 import { loadWorkspaceImage } from "../muse/localImages.ts";
@@ -35,6 +35,7 @@ type FromWebview =
   | { type: "connectorCancel" }
   | { type: "unqueue"; turnId: string }
   | { type: "loadImage"; path: string }
+  | { type: "openChanged"; path: string; diff: boolean }
   | { type: "openFile"; itemId: string; path: string }
   | { type: "openDiff"; itemId: string; path: string }
   | { type: "stop" }
@@ -69,6 +70,9 @@ export class ChatPanel {
   static originals: OriginalProvider | undefined;
   /** The host's patch for each file tool call shown in this chat, by item id (read by this class, never by the page). */
   private readonly patches = new Map<string, PatchFile[]>();
+  /** The order the edits happened in, by item id: a patch is read asynchronously, so arrival order is not edit order. */
+  private readonly patchOrder = new Map<string, number>();
+  private patchSeq = 0;
   /** Set while a connector sign-in waits for the browser; aborting it cancels the flow at the host. */
   private loginAbort: AbortController | undefined;
   /** Whether this chat has any conversation yet (a turn ran here, or a stored session was replayed). */
@@ -250,6 +254,9 @@ export class ChatPanel {
       case "loadImage":
         await this.loadImage(message.path);
         break;
+      case "openChanged":
+        if (typeof message.path === "string") await this.openChanged(message.path, message.diff === true);
+        break;
       case "openFile":
         await this.openPatchedFile(message.itemId, message.path, false);
         break;
@@ -307,6 +314,7 @@ export class ChatPanel {
     this.session = undefined;
     this.profile = profile;
     this.patches.clear();
+    this.patchOrder.clear();
     this.hasConversation = false;
     if (!keepFolders) this.extraRoots = []; // folders added to a chat end with it
     this.post({ type: "reset" });
@@ -344,6 +352,7 @@ export class ChatPanel {
     this.session = undefined;
     this.currentSessionId = undefined;
     this.patches.clear();
+    this.patchOrder.clear();
     this.hasConversation = false;
     if (!keepFolders) this.extraRoots = [];
     this.post({ type: "reset" });
@@ -547,10 +556,67 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     if (event.type === "history") for (const past of event.events) if (past.type === "toolCall" && past.patchRef && past.status === "completed") void this.showPatch(past.itemId, past.patchRef);
   }
 
+  /** Every file changed in this chat, once, with the totals of all its edits (and how many edits that was). */
+  private changedFiles(): { path: string; rel: string | undefined; openable: boolean; added: number; removed: number; edits: number }[] {
+    const roots = this.openableRoots();
+    const byPath = new Map<string, { path: string; added: number; removed: number; edits: number }>();
+    for (const [itemId, files] of [...this.patches].sort((a, b) => (this.patchOrder.get(a[0]) ?? 0) - (this.patchOrder.get(b[0]) ?? 0))) {
+      void itemId;
+      for (const f of files) {
+        const key = normalizeHostPath(canonicalPath(f.path)).toLowerCase();
+        const row = byPath.get(key) ?? { path: f.path, added: 0, removed: 0, edits: 0 };
+        const c = countChanges(f);
+        byPath.set(key, { path: f.path, added: row.added + c.added, removed: row.removed + c.removed, edits: row.edits + 1 });
+      }
+    }
+    return [...byPath.values()].map((r) => {
+      const rel = relativeToRoots(normalizeHostPath(canonicalPath(r.path)), roots);
+      return { ...r, rel, openable: rel !== undefined };
+    });
+  }
+
+  private postChanges(): void {
+    this.post({ type: "changes", files: this.changedFiles() });
+  }
+
+  /** Opens a changed file, or one diff from before the first edit of this chat to the file as it is now. */
+  private async openChanged(path: string, diff: boolean): Promise<void> {
+    const key = normalizeHostPath(canonicalPath(path)).toLowerCase();
+    const edits: { seq: number; hunks: PatchFile["hunks"] }[] = [];
+    for (const [itemId, files] of this.patches) {
+      for (const f of files) if (normalizeHostPath(canonicalPath(f.path)).toLowerCase() === key) edits.push({ seq: this.patchOrder.get(itemId) ?? 0, hunks: f.hunks });
+    }
+    if (edits.length === 0) return;
+    edits.sort((a, b) => a.seq - b.seq);
+    const disk = normalizeHostPath(canonicalPath(path));
+    if (relativeToRoots(disk, this.openableRoots()) === undefined) {
+      this.notice("warning", "That file is outside this chat's folders, so Antares does not open it from here.");
+      return;
+    }
+    const uri = vscode.Uri.file(disk);
+    try {
+      if (diff) {
+        const before = reverseSeries(await readFile(disk, "utf8"), edits.map((e) => e.hunks));
+        const originals = ChatPanel.originals;
+        if (before !== undefined && originals) {
+          await vscode.commands.executeCommand("vscode.diff", originals.add(basename(disk), before), uri, `${basename(disk)} (before this chat ↔ now, ${edits.length} edit${edits.length === 1 ? "" : "s"})`);
+          return;
+        }
+        this.notice("info", "The file changed in a way the chat's edits do not explain, so its version before them cannot be rebuilt. Showing the file itself.");
+      }
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
+    } catch (error) {
+      this.notice("warning", `Could not open the file: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private async showPatch(itemId: string, ref: { path: string; byteLen?: number }): Promise<void> {
+    const seq = this.patchSeq++; // taken before the read, so the order is the order the calls were announced in
     const files = await readPatch(ref);
     if (files.length === 0) return;
     this.patches.set(itemId, files);
+    this.patchOrder.set(itemId, seq);
+    this.postChanges();
     const roots = this.openableRoots();
     this.post({
       type: "patch",
@@ -605,6 +671,12 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       this.post({ type: "event", event });
       this.afterEvent(event);
     }
+    const series = vscode.workspace.getConfiguration("antares").get<string[]>("dev.patchSeries", []);
+    series.forEach((p, i) => {
+      const event: ChatEvent = { type: "toolCall", itemId: `demo-series-${i}`, tool: "edit_file", summary: "series.txt", status: "completed", held: false, file: { op: "edit", path: "series.txt" }, patchRef: { path: p } };
+      this.post({ type: "event", event });
+      this.afterEvent(event);
+    });
   }
 
   // ---- the composer's "+" menu ----

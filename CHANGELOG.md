@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — phase 3D (second slice): changes in this chat
+
+- A **Changes (n)** button (next to Usage) lists every file the agent changed in this chat, once, with its number of edits and `+n −m` totals. **Open diff** compares the file before the chat's first edit with now, in VS Code's diff editor; **Open file** opens it. The "before" is rebuilt by undoing the chat's edits from the most recent to the oldest. If a line inside a region an edit touched has changed since, no "before" is invented: the file opens and a note says why. Changes elsewhere in the file are kept (only the chat's edits are undone). Replayed history counts too, in the order the edits happened.
+- Development setting `antares.dev.patchSeries` feeds successive patches of one file for the real-window check.
+- **Not built, with reasons.** Worktrees (`session/start.worktree`, `worktree/list`): on the test machine the host's own git probe times out after 10 seconds (also for this project's repository) while `git` answers in 0.15 s, and `session/start` with a worktree answered "names no repository", so there was no way to create or test one. An embedded terminal: it would re-run what the agent ran under other permissions, which is not the same as seeing what it did; tool cards already show the command and its output.
+- Probes: `scripts/probe-worktree.ts` and `scripts/probe-worktree-list.mjs`.
+- Tests: 165 unit tests (2 new); the real-window flow now also checks the Changes panel and the cumulative diff (45 checks on both editors).
+
 ## Unreleased — phase 3C: images from the workspace
 
 - A `read_file` of an image shows that file's thumbnail on its tool card, and `![alt](path)` in an assistant message shows the file. The page only asks; the **extension** reads the file and answers with the data or the reason it refused.

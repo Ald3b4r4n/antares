@@ -181,6 +181,45 @@
       }
     }
   }
+  // ---- every file changed in this chat, with one diff per file ----
+  const changesBtn = $("changesBtn");
+  state.changes = [];
+  function onChanges(msg) {
+    state.changes = msg.files || [];
+    changesBtn.hidden = state.changes.length === 0;
+    changesBtn.textContent = "Changes (" + state.changes.length + ")";
+    if (!extrasPanel.hidden && extrasPanel.dataset.kind === "changes") renderChanges();
+  }
+  function renderChanges() {
+    extrasList.replaceChildren();
+    const rows = state.changes;
+    const edits = rows.reduce((n, r) => n + r.edits, 0);
+    extrasStatus.textContent = rows.length
+      ? rows.length + " file" + (rows.length === 1 ? "" : "s") + " changed in " + edits + " edit" + (edits === 1 ? "" : "s") + ". Open diff compares each file before the chat's first edit with now."
+      : "Nothing has been changed in this chat yet.";
+    for (const r of rows) {
+      const li = el("li", "session extra-row");
+      const info = el("div", "session-info");
+      info.append(el("div", "session-title", r.rel || r.path), el("div", "session-meta", r.edits + (r.edits === 1 ? " edit" : " edits") + " · +" + r.added + " \u2212" + r.removed));
+      const actions = el("div", "session-actions");
+      if (r.openable) {
+        const diff = el("button", "link", "Open diff");
+        diff.addEventListener("click", () => vscode.postMessage({ type: "openChanged", path: r.path, diff: true }));
+        const open = el("button", "link", "Open file");
+        open.addEventListener("click", () => vscode.postMessage({ type: "openChanged", path: r.path, diff: false }));
+        actions.append(diff, open);
+      }
+      li.append(info, actions);
+      extrasList.append(li);
+    }
+  }
+  changesBtn.addEventListener("click", () => {
+    extrasPanel.hidden = false;
+    extrasPanel.dataset.kind = "changes";
+    extrasTitle.textContent = "Changes in this chat";
+    $("extrasActions").replaceChildren();
+    renderChanges();
+  });
   function onImage(msg) {
     state.images.set(msg.path, msg);
     hydrateImages(document);
@@ -785,6 +824,7 @@
     else if (msg.type === "picked") onPicked(msg);
     else if (msg.type === "patch") onPatch(msg);
     else if (msg.type === "image") onImage(msg);
+    else if (msg.type === "changes") onChanges(msg);
     else if (msg.type === "folders") renderFolders(msg.folders || []);
     else if (msg.type === "skills") onSkills(msg);
     else if (msg.type === "extras") onExtras(msg);
@@ -795,6 +835,8 @@
       state.pending.clear();
       state.toolEvents.clear();
       state.patches.clear();
+      state.changes = [];
+      changesBtn.hidden = true;
       state.images.clear();
       state.imageAsked.clear();
       renderPending();
