@@ -42,8 +42,13 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 |---|---|---|
 | 0 | MSP client, offline self-test (echo provider), Antares panel with banner | **Done** |
 | 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only, model and reasoning-effort picker (catalog shown before the first message, choice remembered), image input (paste, drop or attach; PNG verified against the real host), subscription usage (5 h and weekly windows with "as of", threshold alerts, status bar, local token ledger), session history (continue or fork a stored session of the open folder, with the conversation redrawn). **Phase 1 feature list complete and checked in the real editors, including real approvals.** Not yet seen: file-access and Unix-socket approvals, multi-stage approvals from the real host (handled and tested against a fake one), and `:auto-review`. | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
-| 2 | Voice input (local Whisper, transcript sent as text), skills (`/`), worktrees | Planned |
-| 3 | MCP servers, plugins, hooks, editor diffs, terminal | Planned |
+| 2A | Voice input: microphone button, **local** Whisper transcription (the text lands in the box for review; Muse takes no audio) | **In progress** |
+| 2B | Composer "+" menu: attach photos and files (`@path` mentions; Muse has no file part), add a folder (grants access, so it asks), slash commands from Muse skills, connectors and plugins entry points, queue with Ctrl+Enter and steer with Enter | Planned |
+| 2C | Permission modes selector (Automatic, Manual, Accept edits, Plan, Ignore permissions) that switches without losing the conversation. Mapped onto Muse's profiles and approval modes; "Accept edits" and "Plan" exist only on Antares' side and are explicit user choices | Planned: the mapping is confirmed by probes first |
+| 3A | Connectors (MCP servers), plugins, hooks | Planned |
+| 3B | Web and browser: reading the web already works with per-domain approvals; browser *control* through an MCP browser server the user configures, plus Computer Use approval cards if the host sends them (the host's own Computer Use is described for macOS only) | Planned |
+| 3C | Show images in the chat: images the model saw (tool captures) and workspace image files. **Model-generated images only if the host delivers them; the contract says nothing about image output** | Planned |
+| 3D | Editor diffs, terminal, worktrees | Planned |
 | 4 | Video input, polish, Open VSX / Marketplace packaging | Planned |
 
 Details, decisions and open questions: [docs/PLAN.md](docs/PLAN.md) (in Portuguese for now).
