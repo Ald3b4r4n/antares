@@ -39,9 +39,15 @@ export function activate(context: vscode.ExtensionContext): AntaresApi {
     }
   };
 
+  // The activity-bar button: its view only holds the welcome buttons from package.json, and showing it opens the chat.
+  const launcher = vscode.window.createTreeView("antares.launcher", { treeDataProvider: { getTreeItem: (e: never) => e, getChildren: () => [] } });
+  launcher.onDidChangeVisibility((e) => {
+    if (e.visible) void vscode.commands.executeCommand("antares.open");
+  });
   const originals = new OriginalProvider();
   ChatPanel.originals = originals;
   context.subscriptions.push(
+    launcher,
     output,
     tracker,
     vscode.workspace.registerTextDocumentContentProvider(ORIGINAL_SCHEME, originals),

@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const exe = process.argv[2];
 const REAL = process.env.E2E_REAL === "1";
@@ -458,8 +459,8 @@ try {
     // The sandbox note follows what the host reported: shown in a mode that runs commands in the sandbox only
     // when the host says it cannot enforce one (this depends on the machine, so the check compares the two).
     await waitFor("the host's sandbox report", () => evalWeb("/sandbox (un)?available/.test(d.getElementById('meta').textContent)"), 30000);
-    const sb = await evalWeb("({ shown: !d.getElementById('sandboxNote').hidden, text: d.getElementById('sandboxNote').textContent.slice(0, 140), unavailable: /sandbox unavailable/.test(d.getElementById('meta').textContent) })");
-    check("the sandbox note appears in Accept edits exactly when the host reports no sandbox", sb.shown === sb.unavailable && (!sb.shown || /fail before they start/.test(sb.text)), JSON.stringify(sb));
+    const sb = await evalWeb("({ shown: !d.getElementById('sandboxNote').hidden, text: d.getElementById('sandboxNote').textContent.slice(0, 140), bypass: !!d.querySelector('#sandboxNote button'), unavailable: /sandbox unavailable/.test(d.getElementById('meta').textContent) })");
+    check("the sandbox note appears in Accept edits exactly when the host reports no sandbox", sb.shown === sb.unavailable && (!sb.shown || (/fail before they start/.test(sb.text) && sb.bypass)), JSON.stringify(sb));
 
     // The resumed session works: its skill list answers again.
     await slashOpen();
@@ -678,7 +679,7 @@ try {
     // The menu.
     await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
     const menu = await evalWeb("({ open: !d.getElementById('plusMenu').hidden, expanded: d.getElementById('plus').getAttribute('aria-expanded'), items: [...d.querySelectorAll('#plusMenu .menu-item')].map(b => b.querySelector('span').textContent) })");
-    check("the + button opens a menu with files, folder, slash commands, connectors, plugins and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Slash commands", "Connectors", "Plugins", "Import skills…"]), JSON.stringify(menu));
+    check("the + button opens a menu with files, folder, slash commands, connectors, plugins and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Add current file", "Add selection", "Slash commands", "Connectors", "Plugins", "Import skills…"]), JSON.stringify(menu));
     await shot("15-plus-menu");
 
     // Files and photos: a text file inside the workspace becomes @path, a name with a space is quoted, a photo
@@ -691,6 +692,36 @@ try {
     check("a file outside the workspace is refused with an explanation instead of a useless mention", picked.notices.some((n) => /outside\.txt is outside/.test(n)) && !picked.input.includes("outside"), JSON.stringify(picked.notices));
     await shot("16-files-picked");
     await evalWeb("(() => { d.querySelector('.thumb-remove').click(); const i = d.getElementById('input'); i.value = ''; return true; })()");
+
+    // A drop from the Explorer: only addresses, no File object. It must end as an @mention.
+    await evalWeb("(() => { const i = d.getElementById('input'); i.value = ''; return true; })()");
+    await evalWeb(`(() => { const dt = new w.DataTransfer(); dt.setData('text/uri-list', ${JSON.stringify(pathToFileURL(join(workspace, "hello.txt")).href)}); w.dispatchEvent(new w.DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); return true; })()`);
+    await waitFor("the dropped Explorer file", () => evalWeb("d.getElementById('input').value.includes('@hello.txt')"), 15000);
+    check("a file dragged from the Explorer (only its address) becomes an @mention", true);
+    await evalWeb("(() => { d.getElementById('input').value = ''; return true; })()");
+
+    // Add current file and Add selection use the file open in the editor, even though the chat has the focus.
+    // Open hello.txt the way a person does: quick open (Ctrl+P), the name, Enter.
+    await browser.send("Input.dispatchKeyEvent", { type: "rawKeyDown", windowsVirtualKeyCode: 80, key: "p", code: "KeyP", modifiers: 2 }, pageSession);
+    await browser.send("Input.dispatchKeyEvent", { type: "keyUp", windowsVirtualKeyCode: 80, key: "p", code: "KeyP", modifiers: 2 }, pageSession);
+    await waitFor("quick open", () => evalPage("!!document.querySelector('.quick-input-widget:not([style*=\"display: none\"]) input')"), 10000);
+    await browser.send("Input.insertText", { text: "hello.txt" }, pageSession);
+    await sleep(600);
+    await browser.send("Input.dispatchKeyEvent", { type: "rawKeyDown", windowsVirtualKeyCode: 13, key: "Enter", code: "Enter", text: "\r" }, pageSession);
+    await browser.send("Input.dispatchKeyEvent", { type: "keyUp", windowsVirtualKeyCode: 13, key: "Enter", code: "Enter" }, pageSession);
+    await waitFor("hello.txt open in an editor", () => evalPage("[...document.querySelectorAll('.tab')].some(x => /hello\\.txt/.test(x.textContent))"), 15000);
+    await sleep(800);
+    await browser.send("Input.dispatchKeyEvent", { type: "rawKeyDown", windowsVirtualKeyCode: 65, key: "a", code: "KeyA", modifiers: 2, commands: ["selectAll"] }, pageSession);
+    await browser.send("Input.dispatchKeyEvent", { type: "keyUp", windowsVirtualKeyCode: 65, key: "a", code: "KeyA", modifiers: 2 }, pageSession);
+    await sleep(500);
+    await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=currentFile]').click(); return true; })()");
+    await waitFor("the current file mention", () => evalWeb("d.getElementById('input').value.includes('@hello.txt')"), 15000);
+    check("Add current file adds the open file as an @mention", true);
+    await evalWeb("(() => { d.getElementById('input').value = ''; d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=selection]').click(); return true; })()");
+    await waitFor("the selection block", () => evalWeb("d.getElementById('input').value.includes('hello.txt:1-')"), 15000);
+    const snippet = await evalWeb("d.getElementById('input').value");
+    check("Add selection adds the selected text as a quoted block that names the file and lines", /^hello\.txt:1-\d+\n```\nhello\n+```/.test(snippet), JSON.stringify(snippet));
+    await evalWeb("(() => { d.getElementById('input').value = ''; return true; })()");
 
     // Ctrl+U asks for files, like the + menu item.
     await setPicks([join(workspace, "hello.txt")]);
@@ -764,6 +795,10 @@ try {
   await browser.send("Emulation.setDeviceMetricsOverride", { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false }, pageSession);
 
   }
+
+  // The activity-bar launcher exists next to the other views.
+  const launcher = await evalPage("[...document.querySelectorAll('.activitybar .action-label')].map(x => x.getAttribute('aria-label') || '').filter(x => /Antares/.test(x))");
+  check("the activity bar has an Antares launcher button", launcher.length > 0, JSON.stringify(launcher));
 
   // Status bar item exists in the real workbench.
   const status = await evalPage("[...document.querySelectorAll('.statusbar-item')].map(e => e.textContent.trim()).filter(t => /Antares|5h\\s*[\\d–]/.test(t))");

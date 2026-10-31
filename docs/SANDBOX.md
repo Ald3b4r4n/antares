@@ -59,6 +59,15 @@ Tried as a workaround and **rejected**: starting the host with `--disable-sandbo
 
 Until it is fixed: Antares shows the problem in the footer and on the failed call, Plan and Accept edits still read and edit, and commands can be run in the editor's own terminal.
 
+## What Antares does when the sandbox is missing
+
+Antares tells you at the moment it matters, and offers the way out, but never takes it for you:
+
+- **Before anything fails:** in **Auto** and **Accept edits**, a note under the mode selector says that shell commands will fail, with a **Switch to Bypass permissions…** button.
+- **When a command is blocked:** the failed tool call says why, repeats the fix, and carries the same button. The first time in a chat, a notice appears in the message flow too (the card can scroll away), with the same button.
+- **The button only asks.** It opens the mode switch, whose dialog says what Bypass removes (no sandbox, no approval prompts). You confirm or cancel; the conversation continues under the new mode.
+- Bypass is the same as YOLO in the Muse terminal app. Use it only on a project you accept exposing. Switch back to Accept edits or Plan (Shift+Tab) when you no longer need commands.
+
 ## Working without it
 
 - **Plan** and **Accept edits** still read and edit files, which covers reviewing and writing code.

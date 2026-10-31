@@ -10,6 +10,9 @@ Everything below under "Unreleased" is part of this build. In one place:
 - **Manage:** plugin install (folder or marketplace) and marketplaces, connector OAuth sign-in and sign-out, skill import. Each step says what it does and asks first.
 - **Not built or not possible, with reasons:** video input (untestable end to end here), worktrees (the host's git probe times out on the test machine), an embedded terminal (left out on purpose), adding or removing MCP servers (the protocol has no setting), reading a skill's activation, the image a model saw through a tool, model-generated images, voice recording on macOS and Linux.
 - **Known problem on the test machine:** the host reports the Windows sandbox as unavailable although `muse sandbox windows check` says ready; see docs/SANDBOX.md.
+- **Sandbox, offered at the right moment:** when the sandbox is unavailable, the note under the mode selector and the failed shell call carry a **Switch to Bypass permissions…** button (it opens the confirmation; it never switches by itself), and the first blocked command in a chat also raises a notice in the message flow.
+- **Activity-bar launcher:** an Antares icon in the activity bar (next to the other views); showing it opens the chat, and its view has buttons for usage and voice setup.
+- **"+" menu additions:** *Add current file* (an @mention), *Add selection* (a quoted block naming the file and lines, capped at 20,000 characters) and files dragged from the Explorer (they carry only their addresses).
 - **Version** bumped from 0.0.1 to 0.1.0.
 
 ## Unreleased — phase 3D (second slice): changes in this chat

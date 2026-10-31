@@ -145,6 +145,8 @@ export type ChatEvent =
       failure?: string;
       /** Help for a failure Antares recognizes (see `failureHint`). */
       hint?: string;
+      /** What the page may offer next to the hint: `bypass` = a button that asks to switch to Bypass permissions. */
+      hintAction?: "bypass";
       output?: string;
       /** A `write_todos` call: the checklist it set. */
       todos?: TodoView[];
@@ -385,10 +387,16 @@ const SANDBOX_FIX_OTHER = " See Muse's documentation for setting up its sandbox 
  * the sandbox unavailable a shell command fails before it starts ("sandbox enforcement unavailable:
  * windows_elevated setup_required"), and a rejected approval ends a tool call with "approval aborted".
  */
+export function isSandboxFailure(failure: string | undefined): boolean {
+  return !!failure && /sandbox enforcement unavailable|setup_required/i.test(failure);
+}
+
+const BYPASS_ADVICE = " To run commands anyway, switch the mode to Bypass permissions: no sandbox and no approval prompts, so only in a project you accept exposing.";
+
 export function failureHint(failure: string | undefined, platform: string = process.platform): string | undefined {
   if (!failure) return undefined;
-  if (/sandbox enforcement unavailable|setup_required/i.test(failure)) {
-    return `Muse's sandbox is not available on this computer, so shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}`;
+  if (isSandboxFailure(failure)) {
+    return `Muse's sandbox is not available on this computer, so shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}${BYPASS_ADVICE}`;
   }
   if (/approval aborted/i.test(failure)) return "This approval was rejected: you chose Reject, the automatic reviewer declined it, or the turn was stopped while it waited.";
   return undefined;
@@ -397,7 +405,7 @@ export function failureHint(failure: string | undefined, platform: string = proc
 /** Shown while the chat is in a mode that runs commands inside the sandbox, when the host says it cannot enforce one. */
 export function sandboxNote(availability: string | undefined, platform: string = process.platform): string | undefined {
   if (availability !== "unavailable") return undefined;
-  return `Muse's sandbox is not available on this computer. In this mode shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}`;
+  return `Muse's sandbox is not available on this computer. In this mode shell commands fail before they start; file reads and edits still work.${platform === "win32" ? SANDBOX_FIX_WINDOWS : SANDBOX_FIX_OTHER}${BYPASS_ADVICE}`;
 }
 
 function parseArgs(args: unknown): Obj | undefined {
@@ -454,6 +462,7 @@ function mapToolCall(item: Obj, itemId: string): ChatEvent {
     heldFor: str(item.heldFor),
     failure: failure ? clip(failure, 600) : undefined,
     hint: failureHint(failure),
+    ...(isSandboxFailure(failure) ? { hintAction: "bypass" as const } : {}),
     output: output && !failure ? clip(output, 600) : undefined,
     ...details.extra,
   };

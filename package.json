@@ -33,6 +33,18 @@
   "main": "./dist/extension.cjs",
   "activationEvents": [],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [{ "id": "antares", "title": "Antares", "icon": "media/antares-activity.svg" }]
+    },
+    "views": {
+      "antares": [{ "id": "antares.launcher", "name": "Antares" }]
+    },
+    "viewsWelcome": [
+      {
+        "view": "antares.launcher",
+        "contents": "**Antares**, an open interface for Muse Code.\n\n[Open Antares](command:antares.open)\n\n[Show subscription usage](command:antares.showUsage)\n\n[Set up local voice](command:antares.setupVoice)\n\nThe Antares chat opens beside your editor. If shell commands fail with \"sandbox unavailable\", switch the chat to Bypass permissions (see docs/SANDBOX.md in the repository)."
+      }
+    ],
     "commands": [
       {
         "command": "antares.open",

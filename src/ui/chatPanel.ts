@@ -22,6 +22,9 @@ type FromWebview =
   | { type: "ready" }
   | { type: "send"; text: string; images?: ImageInput[]; mode?: "steer" | "queue" }
   | { type: "pickFiles" }
+  | { type: "addCurrentFile" }
+  | { type: "addSelection" }
+  | { type: "dropUris"; uris: string[] }
   | { type: "addFolder" }
   | { type: "removeFolder"; path: string }
   | { type: "listSkills" }
@@ -125,7 +128,12 @@ export class ChatPanel {
     this.effort = context.globalState.get<string>("antares.effort") || undefined;
     panel.webview.html = this.html();
     panel.webview.onDidReceiveMessage((message: FromWebview) => void this.onMessage(message));
+    this.lastEditor = vscode.window.activeTextEditor;
+    this.editorTracker = vscode.window.onDidChangeActiveTextEditor((e) => {
+      if (e) this.lastEditor = e;
+    });
     panel.onDidDispose(() => {
+      this.editorTracker?.dispose();
       ChatPanel.current = undefined;
       this.voice.dispose();
       void this.session?.stop();
@@ -214,6 +222,15 @@ export class ChatPanel {
         break;
       case "pickFiles":
         await this.pickFiles();
+        break;
+      case "addCurrentFile":
+        await this.addCurrentFile();
+        break;
+      case "addSelection":
+        await this.addSelection();
+        break;
+      case "dropUris":
+        await this.dropUris(message.uris);
         break;
       case "addFolder":
         await this.addFolder();
@@ -706,23 +723,36 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       ? dev.map((p) => vscode.Uri.file(p))
       : await vscode.window.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: false, defaultUri: vscode.Uri.file(root), openLabel: "Add", title: "Add files or photos" });
     if (!uris || uris.length === 0) return;
+    await this.addPaths(uris.map((u) => u.fsPath));
+  }
+
+  /**
+   * Adds files to the message, whatever way they came (the dialog, a drop from the Explorer, the current file): photos
+   * become attachments, other files become @mentions when they are inside this chat's folders, the rest is explained.
+   */
+  private async addPaths(paths: string[]): Promise<void> {
+    const root = this.workspaceFolder();
+    if (!root) {
+      this.notice("error", "Open a folder first: Muse works inside a workspace.");
+      return;
+    }
     const roots = rootsFor(root, this.extraRoots);
     const images: { name: string; mediaType: string; base64Data: string }[] = [];
     const mentions: string[] = [];
     const skipped: string[] = [];
-    for (const uri of uris) {
-      const name = basename(uri.fsPath);
+    for (const path of paths) {
+      const name = basename(path);
       const imageType = imageTypeFor(name);
       try {
         if (imageType) {
-          const size = (await stat(uri.fsPath)).size;
+          const size = (await stat(path)).size;
           if (size > MAX_IMAGE_BYTES) {
             skipped.push(`${name} is too large (${(size / 1048576).toFixed(1)} MB; the limit is ${MAX_IMAGE_BYTES / 1048576} MB).`);
             continue;
           }
-          images.push({ name, mediaType: imageType, base64Data: (await readFile(uri.fsPath)).toString("base64") });
+          images.push({ name, mediaType: imageType, base64Data: (await readFile(path)).toString("base64") });
         } else {
-          const mention = mentionFor(uri.fsPath, roots);
+          const mention = mentionFor(path, roots);
           if (mention) mentions.push(mention);
           else skipped.push(`${name} is outside this chat's folders, so Muse's file tools would refuse it. Use "Add folder" for its folder first.`);
         }
@@ -731,6 +761,61 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       }
     }
     this.post({ type: "picked", images, mentions, skipped });
+  }
+
+  /** The last text editor the user looked at: the chat's own webview takes focus away from the active one. */
+  private lastEditor: vscode.TextEditor | undefined;
+  private editorTracker: vscode.Disposable | undefined;
+
+  private editorForContext(): vscode.TextEditor | undefined {
+    return vscode.window.activeTextEditor ?? this.lastEditor ?? vscode.window.visibleTextEditors.find((e) => e.document.uri.scheme === "file");
+  }
+
+  /** "Add current file": the file open in the editor becomes an @mention (or is explained when it is outside the chat's folders). */
+  private async addCurrentFile(): Promise<void> {
+    const editor = this.editorForContext();
+    if (!editor || editor.document.uri.scheme !== "file") {
+      this.notice("info", "There is no file open in the editor to add.");
+      return;
+    }
+    await this.addPaths([editor.document.uri.fsPath]);
+  }
+
+  /**
+   * "Add selection": the selected text of the current editor goes into the message as a quoted block that says which
+   * file and lines it came from, so the model sees exactly what you saw. Capped, because a message is not a file.
+   */
+  private async addSelection(): Promise<void> {
+    const editor = this.editorForContext();
+    const sel = editor?.selection;
+    if (!editor || !sel || sel.isEmpty) {
+      this.notice("info", "Select some text in an editor first, then choose Add selection.");
+      return;
+    }
+    const MAX = 20_000;
+    let text = editor.document.getText(sel);
+    const cut = text.length > MAX;
+    if (cut) text = text.slice(0, MAX);
+    const root = this.workspaceFolder();
+    const rel = root ? relativeToRoots(normalizeHostPath(canonicalPath(editor.document.uri.fsPath)), rootsFor(root, this.extraRoots).map((r) => normalizeHostPath(canonicalPath(r)))) : undefined;
+    const where = `${rel ?? basename(editor.document.uri.fsPath)}:${sel.start.line + 1}-${sel.end.line + 1}`;
+    const fence = text.includes("```") ? "~~~~" : "```";
+    this.post({ type: "picked", images: [], mentions: [], skipped: cut ? [`The selection was longer than ${MAX} characters; the first ${MAX} were added.`] : [], snippet: `${where}\n${fence}\n${text}\n${fence}\n` });
+  }
+
+  /** Files dropped on the chat from the Explorer (they arrive as file: URIs); anything else is ignored. */
+  private async dropUris(uris: string[]): Promise<void> {
+    if (!Array.isArray(uris)) return;
+    const paths: string[] = [];
+    for (const raw of uris.slice(0, 20)) {
+      try {
+        const uri = vscode.Uri.parse(String(raw));
+        if (uri.scheme === "file") paths.push(uri.fsPath);
+      } catch {
+        /* not a URI */
+      }
+    }
+    if (paths.length > 0) await this.addPaths(paths);
   }
 
   /**

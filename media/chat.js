@@ -74,6 +74,7 @@
     modeId: undefined,
     sandbox: undefined,
     sandboxNote: undefined, // set when the host cannot enforce its sandbox
+    bypassOffered: false, // the notice that offers Bypass is shown once per chat
   };
 
   const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
@@ -255,10 +256,20 @@
     });
   }
   function addNotice(level, text) {
-    append(el("div", "notice " + level, text));
+    const node = el("div", "notice " + level, text);
+    append(node);
+    return node;
   }
 
   // ---- tool calls ----
+  // Asks the extension to switch to Bypass permissions; it shows its own confirmation that says what that removes.
+  function bypassButton() {
+    const b = el("button", "link tiny", "Switch to Bypass permissions\u2026");
+    b.title = "No sandbox and no approval prompts. You will be asked to confirm.";
+    b.addEventListener("click", () => vscode.postMessage({ type: "setMode", modeId: "bypass" }));
+    return b;
+  }
+
   function upsertTool(e) {
     state.toolEvents.set(e.itemId, e);
     let node = state.tools.get(e.itemId);
@@ -287,7 +298,23 @@
     }
     if (e.held) node.append(el("div", "tool-note", "held" + (e.heldFor ? " for " + e.heldFor : "")));
     if (e.failure) node.append(el("div", "tool-fail", e.failure));
-    if (e.failure && e.hint) node.append(el("div", "tool-hint", e.hint));
+    if (e.failure && e.hint) {
+      const hintEl = el("div", "tool-hint", e.hint);
+      if (e.hintAction === "bypass") {
+        hintEl.append(" ");
+        hintEl.append(bypassButton());
+        // Said once per chat in the message flow too, because a failed card scrolls away.
+        if (!state.bypassOffered) {
+          state.bypassOffered = true;
+          const n = addNotice("warning", "A shell command was blocked because Muse's sandbox is unavailable. To run commands in this chat, switch the mode to Bypass permissions (no sandbox, no approval prompts).");
+          if (n) {
+            n.append(" ");
+            n.append(bypassButton());
+          }
+        }
+      }
+      node.append(hintEl);
+    }
     if (patch && !e.failure) node.append(patchBlock(e.itemId, patch));
     if (e.output) {
       const details = el("details", "tool-out");
@@ -619,7 +646,10 @@
     const sandboxNoteEl = $("sandboxNote");
     const needsSandbox = !!state.sandboxNote && (state.modeId === "acceptEdits" || state.modeId === "auto");
     sandboxNoteEl.hidden = !needsSandbox;
-    if (needsSandbox) sandboxNoteEl.textContent = state.sandboxNote;
+    if (needsSandbox) {
+      sandboxNoteEl.textContent = state.sandboxNote + " ";
+      sandboxNoteEl.append(bypassButton());
+    }
     modeNote.hidden = !inPlan;
     if (inPlan) {
       $("modeNoteText").textContent = "Plan mode: Muse can read but not change anything. Ask for a plan (try /plan), then carry it out in Accept edits.";
@@ -834,6 +864,7 @@
       closeMenus();
       state.pending.clear();
       state.toolEvents.clear();
+      state.bypassOffered = false;
       state.patches.clear();
       state.changes = [];
       changesBtn.hidden = true;
@@ -1094,6 +1125,8 @@
     closeMenus();
     if (act === "files") vscode.postMessage({ type: "pickFiles" });
     else if (act === "folder") vscode.postMessage({ type: "addFolder" });
+    else if (act === "currentFile") vscode.postMessage({ type: "addCurrentFile" });
+    else if (act === "selection") vscode.postMessage({ type: "addSelection" });
     else if (act === "slash") {
       if (state.skillsError) {
         state.skillsAsked = false;
@@ -1135,6 +1168,12 @@
         input.value = (base === "" || /\s$/.test(base) ? base : base + " ") + missing.join(" ") + " ";
         autosize();
       }
+      input.focus();
+    }
+    if (msg.snippet) {
+      const base2 = input.value;
+      input.value = (base2 === "" || /\s$/.test(base2) ? base2 : base2 + "\n") + msg.snippet;
+      autosize();
       input.focus();
     }
     const files = (msg.images || []).map((i) => fileFromBase64(i.name, i.mediaType, i.base64Data));
@@ -1425,7 +1464,8 @@
     void addFiles(files.filter(Boolean));
   });
   let dragDepth = 0;
-  const hasFiles = (ev) => [...(ev.dataTransfer?.types || [])].includes("Files");
+  // Files from the OS carry "Files"; files dragged from the editor's Explorer carry only their addresses.
+  const hasFiles = (ev) => [...(ev.dataTransfer?.types || [])].some((t) => t === "Files" || t === "text/uri-list");
   window.addEventListener("dragenter", (ev) => {
     if (!hasFiles(ev)) return;
     dragDepth++;
@@ -1444,7 +1484,10 @@
     ev.preventDefault();
     dragDepth = 0;
     document.body.classList.remove("dragging");
-    void addFiles([...ev.dataTransfer.files]);
+    // Files dragged from the Explorer carry no File object, only their addresses: the extension resolves them.
+    const uriList = (ev.dataTransfer.getData("text/uri-list") || "").split(/\r?\n/).filter((u) => u && !u.startsWith("#"));
+    if (ev.dataTransfer.files.length === 0 && uriList.length > 0) vscode.postMessage({ type: "dropUris", uris: uriList });
+    else void addFiles([...ev.dataTransfer.files]);
   });
   input.addEventListener("input", () => {
     autosize();

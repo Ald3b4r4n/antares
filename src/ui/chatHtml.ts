@@ -74,6 +74,8 @@ export function chatHtml(options: ChatHtmlOptions): string {
   <div id="plusMenu" class="menu" role="menu" aria-label="Add to the message" hidden>
     <button role="menuitem" data-act="files" class="menu-item"><span>Add files or photos</span><kbd>Ctrl+U</kbd></button>
     <button role="menuitem" data-act="folder" class="menu-item"><span>Add folder</span></button>
+    <button role="menuitem" data-act="currentFile" class="menu-item"><span>Add current file</span></button>
+    <button role="menuitem" data-act="selection" class="menu-item"><span>Add selection</span></button>
     <button role="menuitem" data-act="slash" class="menu-item"><span>Slash commands</span><kbd>/</kbd></button>
     <button role="menuitem" data-act="connectors" class="menu-item"><span>Connectors</span></button>
     <button role="menuitem" data-act="plugins" class="menu-item"><span>Plugins</span></button>

@@ -139,6 +139,23 @@ Verificado: 15 testes unitários novos (138 no total); janela real no VS Code e 
 ## Fase 4
 Vídeo (`media/upload` em chunks e parte `video`), acabamento, empacotamento (Open VSX e Marketplace) e release.
 
+## Estado final da 0.1.0 contra o plano
+
+| Item do plano | Estado |
+|---|---|
+| 1. Chat, cópia, imagens, aprovações, perfil, modelo, uso, histórico | **Pronto** |
+| 2A. Voz | **Pronto no Windows** (faster-whisper e fala do Windows; instalada e configurada no editor do autor). **Gravação em macOS e Linux: não feita**, pois não há como testar aqui e não envio código de captura às cegas |
+| 2B. Menu "+" | **Pronto**: arquivos e fotos, pasta, **arquivo atual**, **seleção**, **arrastar do Explorer** (testado com um evento de soltar sintético; um arrasto real do Explorer não foi verificado), barra de comandos, conectores, plugins, importar skills, fila |
+| 2C. Modos de permissão | **Pronto**; Manual aparece indisponível porque o Muse não tem esse perfil |
+| 3A. Conectores, plugins, skills | **Pronto dentro do protocolo** (OAuth só contra host falso; ativação de skill não pode ser lida de volta; adicionar servidor MCP não existe no MSP) |
+| 3B. Navegador | **Pronto até onde a Antares pode ir** (cartões de Computer Use, argumentos, guia); depende de um servidor MCP configurado no Muse |
+| 3C. Imagens | **Pronto até onde o host permite** (arquivos do workspace); a imagem que o modelo viu e imagens geradas não são expostas |
+| 3D. Diffs e Changes | **Pronto**. **Worktrees: bloqueado** (o git do host expira); **terminal embutido: omitido de propósito** |
+| 4. Vídeo | **Não feito**: não dá para testar de ponta a ponta sem um vídeo real e um turno pago |
+| 4. Empacotamento | `.vsix` 0.1.0 pronto e instalado; **publicar no Open VSX e no Marketplace precisa das contas e tokens do autor** |
+| Botão na barra lateral | **Pronto**: ícone da Antares na barra de atividades, abre o chat |
+| Sandbox | **Defeito do `muse serve` no Windows**, documentado em SANDBOX.md; a Antares avisa e oferece a troca para Bypass com confirmação |
+
 ## Pendências e riscos conhecidos
 
 - **Aprovações do host real ainda não vistas:** acesso a arquivo, socket Unix, vários estágios, `protectedWrite`, `judgeEscalated`, `:auto-review`.

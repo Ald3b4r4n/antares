@@ -184,3 +184,16 @@ test("tool approvals: the arguments read as name: value lines (a browser tool's 
   assert.equal(subject.summary, "browser_navigate");
   assert.deepEqual(subject.detail, ["url: https://example.com"]);
 });
+
+test("sandbox failure: the tool call offers the switch to Bypass, and says what Bypass is", () => {
+  const e = mapNotification("item/completed", { item: { itemId: "s", kind: "toolCall", tool: "powershell", args: '{"command":"git status"}', status: "failed", failureReason: "environment failure: sandbox enforcement unavailable: windows_elevated setup_required" } });
+  assert.equal(e?.type, "toolCall");
+  if (e?.type === "toolCall") {
+    assert.equal(e.hintAction, "bypass");
+    assert.match(e.hint ?? "", /switch the mode to Bypass permissions/);
+    assert.match(e.hint ?? "", /no sandbox and no approval prompts/);
+  }
+  const other = mapNotification("item/completed", { item: { itemId: "o", kind: "toolCall", tool: "powershell", args: '{"command":"x"}', status: "failed", failureReason: "exit code 1" } });
+  if (other?.type === "toolCall") assert.equal("hintAction" in other, false, "no offer for an ordinary failure");
+  assert.match(sandboxNote("unavailable", "win32") ?? "", /Bypass permissions/);
+});
