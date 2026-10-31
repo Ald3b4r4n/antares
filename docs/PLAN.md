@@ -69,15 +69,26 @@ Verificado: 7 testes unitários novos (119 no total); host real sem turno (troca
 
 ## Fase 3: conectores, navegador e imagens
 
-### 3A. Conectores e plugins
-Telas de gerenciamento (lista, estado de login OAuth, ativar), presets de conectores e `hook/list`. Depende de 2B.
+### 3A. Conectores, plugins e skills (revisada pelo que o protocolo permite)
+
+O que o MSP realmente oferece (ver PROTOCOL-NOTES, "what a client can configure"):
+
+| Área | Possível | Não possível |
+|---|---|---|
+| **Conectores (MCP)** | Listar (**feito**, somente leitura) e **entrar/sair por OAuth** (`mcpServer/oauthLogin` devolve a URL que o cliente abre no navegador; `oauthLogout`). Experimental | **Adicionar, remover ou editar** servidores: não há chave de configuração no MSP. Vêm da configuração do próprio Muse ou de um plugin |
+| **Plugins** | Listar (**feito**), instalar (marketplace ou pasta local), adicionar/atualizar/remover marketplaces. Estáveis. Instalar **executa código de terceiros**: confirmação com origem e escopo | Desinstalar e ligar/desligar: não há método |
+| **Skills** | Listar (**feito**), ligar/desligar por escopo (`on`, `userInvocableOnly`, `off`), importar de Claude/Codex com **prévia** (`dryRun`) | Criar/editar skill |
+| **Configurações do host** | Nove chaves: `tools.web_fetch.enabled`, `tools.web_search.mode`, `reasoning_effort`, `model`, `provider`, `permissions.default_profile`, `run.workflow_trigger_mode`, `tools.artifact.enabled` (experimental) | Qualquer outra coisa |
+| **Hooks** | Listar (`hook/list`, somente leitura) | Gerenciar |
+
+Nada disto foi executado contra servidor real nem contra a configuração do usuário; cada fatia nova começa por sonda em configuração isolada.
 
 ### 3B. Acesso e controle de navegador
 
 | Camada | O que existe | Plano |
 |---|---|---|
 | Ler a web | `web_fetch` e `web_search` (**observado**); pedem aprovação de rede por domínio | Já funciona; melhorar o cartão (domínio, regra que a opção cria) |
-| Controlar um navegador | O "Computer Use" do host tem cartões de aprovação próprios (página, janela, passos, efeitos), mas o setup descrito é de **macOS** (`computerUseSetup`, "grants") e fica atrás de um gate. No Windows: **desconhecido** | Caminho realista: **servidor MCP de navegador** (por exemplo Playwright ou Chrome DevTools) configurado pelo usuário em 3A, com a Antares mostrando chamadas, capturas e aprovações |
+| Controlar um navegador | O "Computer Use" do host tem cartões de aprovação próprios, mas o setup descrito é de **macOS** e fica atrás de um gate; no Windows: **desconhecido**. **Servidores MCP não podem ser adicionados pelo MSP** (sonda de configurações), então o caminho realista é o usuário configurar um servidor MCP de navegador (Playwright, Chrome DevTools) **no próprio Muse** ou via plugin | A Antares mostra o servidor na lista de conectores, exibe as chamadas, capturas e aprovações e documenta como configurar; não configura nada por conta própria |
 | Aprovações de Computer Use | `ApprovalCuaCardFacts` no contrato | Renderizar o cartão (host da página, título da janela entre aspas, cada passo e seu efeito) se o host enviar; **nunca aprovar automaticamente** |
 | Navegador do editor | O editor tem navegador embutido | Só como ideia: um MCP que controle esse navegador; fora do escopo até 3A funcionar |
 
