@@ -65,7 +65,7 @@ Verificado: 7 testes unitários novos (119 no total); host real sem turno (troca
 |---|---|
 | Shell falha antes de começar quando o sandbox do Windows não foi configurado (`windows_elevated setup_required`); o modelo então tenta escalar por aprovação | **Corrigido** na parte da Antares: aviso sob o seletor de modo e dica no cartão da ferramenta, com o comando `muse sandbox windows setup` (do terminal de administrador do usuário; a Antares nunca o executa). A configuração em si é do ambiente do usuário |
 | "approval aborted" sem cartão de aprovação visível | **Explicado na dica**; o histórico retomado não repete cartões de aprovação (limite do host). Não foi possível saber, só pela imagem, se foi rejeição do usuário, do revisor automático ou interrupção |
-| `write_todos` e outras ferramentas mostram o JSON cru no resumo | Aberto: fica para a fase 3D (apresentação das ferramentas) |
+| `write_todos` e outras ferramentas mostram o JSON cru no resumo | **Corrigido** na fase 3D para `write_todos`, `write_file` e `edit_file` |
 
 ## Fase 3: conectores, navegador e imagens
 
@@ -103,7 +103,21 @@ Risco central: controle de navegador é a ação de maior impacto. Cada domínio
 | O modelo **gerar** imagens | **Nada no contrato** sobre saída de imagem; o catálogo de modelos não declara modalidades | Condicionado: só habilitar se o host entregar o conteúdo. Hoje desconhecido |
 | Mensagem do usuário com imagem | Só metadados voltam; os bytes não | Miniaturas locais (**pronto**) |
 
-Também nesta fase: diffs no editor, terminal, worktrees (`session/start.worktree`).
+### 3D. Apresentação das ferramentas e diffs (primeira fatia pronta)
+
+Observado com **um** turno real em pasta descartável (`scripts/probe-approval.ts` com `PROBE_LABEL=tools`): ferramentas `write_file {path, content}`, `edit_file {path, find, replace}`, `write_todos {todos: [{text, status}]}`, `read_file {path}`. As de arquivo trazem **`patchSummary {files, added, removed}`** e **`patchRef`** (um JSON do próprio host com `files[].hunks[]` de linhas `+`, `-` e contexto); `session/todoListChanged` traz a lista com `completed`, `inProgress`, `pending`. Os argumentos já vêm no `item/started`; o patch só quando a chamada termina.
+
+| Item | Estado |
+|---|---|
+| `write_todos` como **checklist** (feito, em andamento, a fazer) em vez do JSON | **Pronto** |
+| `write_file`/`edit_file`: caminho relativo ao workspace, contagem `+n −m` e **diff embutido** a partir do patch do host (primeiras 60 linhas, o resto no editor) | **Pronto** |
+| **Abrir diff** no editor do VS Code (esquerda: o arquivo **antes**, reconstruído do patch e do arquivo atual; direita: o arquivo) e **Abrir arquivo** | **Pronto**. Só arquivos citados pelo patch daquela chamada e dentro das pastas do chat. Se o arquivo mudou depois, o "antes" **não é inventado**: abre o arquivo e avisa |
+| O patch também aparece nas conversas retomadas do histórico | **Pronto** (o host devolve a mesma forma) |
+| Leitura segura do patch: só caminho absoluto numa pasta `tool-outputs` terminando em `-tool_patch.json`, até 512 KB, no máximo 2000 linhas por arquivo | **Pronto** |
+| Terminal embutido, worktrees (`session/start.worktree`), diff de várias edições da mesma conversa | **Aberto** |
+| `read_skill`, `powershell`, `web_fetch` e demais: resumo simples como antes | Aberto |
+
+Verificado: 15 testes unitários novos (138 no total); janela real no VS Code e no Antigravity IDE (37 checagens cada), incluindo o diff aberto de verdade e as duas metades com o conteúdo certo. **Não verificado com um turno real na interface:** os cartões usam eventos reais do host só nos testes unitários e no probe; a janela real os recebe por um gancho de desenvolvimento (`antares.dev.patch`) que alimenta o mesmo código.
 
 ## Fase 4
 Vídeo (`media/upload` em chunks e parte `video`), acabamento, empacotamento (Open VSX e Marketplace) e release.

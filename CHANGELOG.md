@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — phase 3D (first slice): tool presentation and diffs
+
+- `write_todos` shows a checklist (done, in progress, to do) instead of JSON.
+- `write_file` and `edit_file` show the path relative to the workspace, `+n −m` and an inline diff taken from the host's own patch (`patchRef`). **Open diff** opens VS Code's diff editor with the file before (rebuilt from the patch and the file as it is now) and after; **Open file** opens it. If the file changed since the edit, the "before" side is not invented: the file opens and a note says why. Only files named by that call's patch and inside the chat's folders can be opened.
+- The patch is read by the extension, never by the page, and only from a `*-tool_patch.json` under a `tool-outputs` folder, up to 512 KB. Replayed history shows the same cards.
+- Development setting `antares.dev.patch` feeds the same code a patch, so the real-window check can open the diff without a model turn.
+- Fix: when a mode switch cannot resume the session, Antares no longer leaves a blank chat. With no messages yet, the host may not have written the empty session before it stopped (`session not found`, about one run in five on Antigravity); the chat then starts fresh in the new mode. With a conversation, it is put back under the previous mode.
+- Fix: after a fresh restart the sandbox note stayed while the footer's sandbox label cleared; both now clear and return with the host's report.
+- Tests: 138 unit tests (15 new); the real-window flows pass on both editors (37 and 17 checks). The e2e now prints the page state and takes a screenshot when a run fails.
+
 ## Unreleased — fixes from the first real use
 
 - **The sandbox, explained.** On a Windows PC where Muse's elevated sandbox was never set up, a shell command in Accept edits or Auto fails before it starts ("sandbox enforcement unavailable: windows_elevated setup_required") and the model then tries an approval escalation. Antares now (1) reads the host's `sandboxAvailability` as soon as the host starts and shows a note under the mode selector in modes that run commands in the sandbox, and (2) adds a hint under that failure on the tool card. Both name the fix, `muse sandbox windows setup` from an administrator terminal, and say that Antares never runs it. File reads and edits keep working.

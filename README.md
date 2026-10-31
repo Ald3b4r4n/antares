@@ -49,7 +49,7 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | 3A | Connectors (MCP servers), plugins, hooks | Planned |
 | 3B | Web and browser: reading the web already works with per-domain approvals; browser *control* through an MCP browser server the user configures, plus Computer Use approval cards if the host sends them (the host's own Computer Use is described for macOS only) | Planned |
 | 3C | Show images in the chat: images the model saw (tool captures) and workspace image files. **Model-generated images only if the host delivers them; the contract says nothing about image output** | Planned |
-| 3D | Editor diffs, terminal, worktrees | Planned |
+| 3D | **First slice done:** tool presentation. `write_todos` is a checklist; `write_file` and `edit_file` show the file, the `+n −m` counts and an inline diff built from Muse's own patch, with **Open diff** (VS Code's diff editor, before and after) and **Open file**. Still planned: embedded terminal, worktrees | **In progress** |
 | 4 | Video input, polish, Open VSX / Marketplace packaging | Planned |
 
 Details, decisions and open questions: [docs/PLAN.md](docs/PLAN.md) (in Portuguese for now).
