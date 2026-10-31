@@ -15,7 +15,8 @@ import { isolatedEnv, MuseHost } from "../src/muse/host.ts";
 import { locateMuse } from "../src/muse/locate.ts";
 import { uuidv7 } from "../src/muse/uuidv7.ts";
 
-const binary = locateMuse(process.argv[2]);
+const real = process.argv.includes("--real-env");
+const binary = locateMuse(process.argv.slice(2).find((a) => !a.startsWith("--")));
 if (!binary) {
   console.error("muse executable not found. Pass its path as the first argument.");
   process.exit(2);
@@ -23,7 +24,7 @@ if (!binary) {
 
 const xdg = process.env.XDG_CONFIG_HOME;
 const authCandidate = process.env.MUSE_AUTH_PATH ?? join(xdg && xdg !== "" ? xdg : join(homedir(), ".config"), "muse", "auth.json");
-if (!existsSync(authCandidate)) {
+if (!real && !existsSync(authCandidate)) {
   console.error("No Muse login found (auth file missing). Log in with the official client first.");
   process.exit(2);
 }
@@ -34,8 +35,10 @@ mkdirSync(workspace, { recursive: true });
 const outDir = new URL("../spike-output/", import.meta.url);
 mkdirSync(outDir, { recursive: true });
 
-const env = isolatedEnv(join(work, "muse-home"));
-env.MUSE_AUTH_PATH = authCandidate;
+// --real-env: run in the user's normal environment (real login). Shell and writes stay disabled and
+// the profile is :read-only, but the user's configured MCP servers and hooks may start.
+const env = real ? { ...process.env } : isolatedEnv(join(work, "muse-home"));
+if (!real) env.MUSE_AUTH_PATH = authCandidate;
 
 const host = new MuseHost({
   binary,

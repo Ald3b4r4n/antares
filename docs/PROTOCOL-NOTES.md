@@ -10,17 +10,29 @@ Muse 1.4.14, schema fingerprint `sha256:c94c3d1f…`, Windows. Everything below 
 - **Turn lifecycle (failure path).** `turn/start` is acknowledged with `status: accepted`, `turnId` (equal to the `commandId`) and `disposition: started`. Then: `session/statusChanged` (`running`), `turn/started`, `item/completed` (a `userMessage` item carrying the prompt `text`), `turn/completed`, `session/statusChanged` (`idle`).
 - **Turn failure shape.** `turn/completed` carries `terminal: "failed"`, `reason`, `durationMs` and `error{kind, message, retryable}`. Seen: `kind: "authRequired"`, `retryable: false`, 99 ms, no model call.
 - **Auth state.** `account/read` returned `{state: "loggedOut", credentialRequired: true}` for a host with an isolated config/data tree, although an auth file existed at the default location. The product credential is therefore not (only) that file. Antares must run the host in the user's normal environment and read login state through `account/read`.
-- **Catalog.** In the logged-out, isolated host: `model/list` returned `source: "bundledCatalog"` with an empty `models` array, and `usage/read` returned `{}`.
+- **Catalog while logged out.** In the isolated host: `model/list` returned `source: "bundledCatalog"` with an empty `models` array, and `usage/read` returned `{}`.
 - **Shutdown.** Closing stdin ends the host with exit 0 (`exit reason recorded: stdin_closed`); `session/closed` (`hostShutdown`) is broadcast first.
 
-## Not observed yet (need a logged-in host)
+## Observed with a logged-in host (one minimal real turn)
 
-- Streaming deltas of the assistant message (item `updated` events), reasoning items, tool-call items.
-- `session/tokenUsage`, `session/contextUsage`, `session/modelChanged` payloads.
-- A populated `model/list` and `usage/read` (5 h and weekly percent blocks, tier).
-- `approval/request` as seen from a client.
+Setup: `scripts/probe-turn.ts --real-env`: the user's normal environment, `--disable-shell --disable-write`, profile `:read-only`, empty workspace, prompt "Reply with exactly: ok". `account/read` reported `state: "accountLogin"`.
+
+- **Models.** `model/list` returned `source: "providerCatalog"` with three models for provider `meta`: `muse-wonder-1.0` (default), `muse-spark-1.3`, `muse-spark-1.2`. Each row has `contextLimit` (1,007,997), `outputLimit` (128,000), `releaseDate`, `isDefault`, `variants` (reasoning tiers `minimal`..`max`; `max` is absent on `muse-spark-1.2`), `defaultReasoningEffort`, and `cost: null`. This is the catalog for that account at that moment, not a claim about other tiers.
+- **Streaming.** Assistant text arrives as `item/started` (`kind: agentMessage`), then `item/delta` with `{itemId, field: "text", delta}`, then `item/completed` carrying the full `text` and `messagePhase`. The one-word reply produced a single delta, so multi-delta behavior is still unobserved.
+- **Other item kinds seen in one turn:** `userMessage`, `hookRun` (`hookKey`, `event`, `label`, `runStatus`; the user's configured hooks ran), `reminderChild` (`reminderAgentId`, `childSessionId`, `blocking`). The turn emitted `turn/foregroundCompleted` with `blockingAgents` (`goal-reminder`, `verify-reminder`) and only then `turn/completed`, about 7 s later, so a UI must not treat `foregroundCompleted` as the end.
+- **Tokens.** `session/tokenUsage`: `usage{inputTokens, outputTokens, cachedTokens, cacheWriteTokens, cacheReadTokens, reasoningTokens}`, `promptTokens`, `totalTokens`, `durationMs`, and a `cumulative` block. A trivial prompt reported 41,910 prompt tokens, so the baseline context (instructions plus tool definitions) is large. Whether the reminder child sessions are counted in this figure is unknown.
+- **Context.** `session/contextUsage`: `windowTokens`, `usedTokens`, `pressure` (`normal`).
+- **Subscription usage.** `usage/read` returned `{}` before the first turn and `{usage: ...}` after. `usage/changed` carried `window{usedPercent, windowDurationMins: 300, resetsAtMs}`, `weekly{usedPercent, resetsAtMs}`, an opaque `tier` id and `observedAtMs`. These percentages are account-wide; they must not be attributed to a single turn.
+- **Turn end.** `turn/completed{terminal: "completed", durationMs, timeToFirstTokenMs}`.
+- **Side effects of a real-environment run.** The user's hooks executed, and a session was written to the user's real session history.
+
+## Not observed yet
+
+- Reasoning items, tool-call items, and the `approval/request` flow as seen from a client.
+- Multi-delta streaming, interrupts (`turn/interrupt`), `session/modelChanged`.
+- Image input, `session/resume`, `session/fork`, worktrees.
 
 ## Consequence for the extension
 
-- Never infer login from a file; ask the host (`account/read`), and offer `account/loginStart` (device code) when `loggedOut`.
+- Never infer login from a file; ask the host (`account/read`: `accountLogin` when logged in, `loggedOut` otherwise), and offer `account/loginStart` (device code) when `loggedOut`.
 - Treat `turn/completed.terminal !== "completed"` as a failure and show `error.message`. A turn can end quickly without any model call.
