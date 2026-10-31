@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import { MuseHost } from "./host.ts";
-import { mapApprovalRequest, mapModels, mapNotification, mapUsage, type ChatEvent } from "./events.ts";
+import { MuseHost, MspError } from "./host.ts";
+import { mapApprovalRequest, mapModels, mapNotification, mapUsage, type ChatEvent, type ModelInfo } from "./events.ts";
 import { uuidv7 } from "./uuidv7.ts";
 
 export const READ_ONLY = ":read-only";
@@ -15,6 +15,10 @@ export interface MuseSessionOptions {
    * belt and braces. Any other profile is an explicit choice by the user.
    */
   profile?: string;
+  /** Model to start with. If the host refuses it, the session starts on the default and says so. */
+  modelId?: string;
+  /** Reasoning effort sent with each turn; undefined means "the model's default". */
+  effort?: string;
   /** Provider id for tests (e.g. "echo"); an ephemeral host cannot take a permission profile. */
   provider?: string;
   clientVersion?: string;
@@ -33,13 +37,20 @@ interface InitializeResult {
  * One chat session over one `muse serve` host. Emits "event" (ChatEvent) for everything the UI
  * shows and "exit" when the host goes away. Approvals are never decided by this class: it only
  * relays the host's offered choices to the UI and the user's pick back to the host.
+ *
+ * The host can be warmed (started and asked for the model catalog) before any session exists, so
+ * the model picker is usable before the first message. No model call is made by warming.
  */
 export class MuseSession extends EventEmitter {
   private readonly options: MuseSessionOptions;
   private host?: MuseHost;
+  private hostReady?: Promise<MuseHost>;
   private sessionId?: string;
   private currentTurnId?: string;
   private starting?: Promise<void>;
+  private catalog: ModelInfo[] = [];
+  private modelId?: string;
+  private effort?: string;
   private readonly pendingApprovals = new Set<string>();
 
   info: { version?: string; fingerprint?: string; sandbox?: string; durability?: string } = {};
@@ -47,6 +58,8 @@ export class MuseSession extends EventEmitter {
   constructor(options: MuseSessionOptions) {
     super();
     this.options = options;
+    this.modelId = options.modelId;
+    this.effort = options.effort;
   }
 
   get profile(): string {
@@ -61,6 +74,20 @@ export class MuseSession extends EventEmitter {
     return this.currentTurnId !== undefined;
   }
 
+  private emitEvent(event: ChatEvent): void {
+    this.emit("event", event);
+  }
+
+  private notice(level: "info" | "warning" | "error", text: string): void {
+    this.emitEvent({ type: "notice", level, text });
+  }
+
+  /** Starts the host (no session) and publishes the model catalog. Never makes a model call. */
+  async warm(): Promise<void> {
+    await this.ensureHost();
+    await this.refreshModels();
+  }
+
   /** Starts the host and a session if not already started. Safe to call repeatedly. */
   start(): Promise<void> {
     this.starting ??= this.doStart().catch((error: unknown) => {
@@ -70,19 +97,18 @@ export class MuseSession extends EventEmitter {
     return this.starting;
   }
 
-  private emitEvent(event: ChatEvent): void {
-    this.emit("event", event);
+  private ensureHost(): Promise<MuseHost> {
+    this.hostReady ??= this.spawnHost().catch((error: unknown) => {
+      this.hostReady = undefined;
+      throw error;
+    });
+    return this.hostReady;
   }
 
-  private notice(level: "info" | "warning" | "error", text: string): void {
-    this.emitEvent({ type: "notice", level, text });
-  }
-
-  private async doStart(): Promise<void> {
+  private async spawnHost(): Promise<MuseHost> {
     const { binary, workspaceRoot, env, provider } = this.options;
-    const profile = this.profile;
     const args = [...(this.options.binaryArgs ?? []), "serve"];
-    if (profile === READ_ONLY) args.push("--disable-shell", "--disable-write");
+    if (this.profile === READ_ONLY) args.push("--disable-shell", "--disable-write");
     if (provider) args.push("--provider", provider, "--no-session-log");
     const host = new MuseHost({ binary, args, cwd: workspaceRoot, env: env ?? process.env });
     this.host = host;
@@ -92,11 +118,11 @@ export class MuseSession extends EventEmitter {
       this.currentTurnId = undefined;
       this.sessionId = undefined;
       this.starting = undefined;
+      this.hostReady = undefined;
       this.pendingApprovals.clear();
       this.emit("exit", code);
     });
     host.start();
-
     const init = await host.request<InitializeResult>("initialize", {
       clientInfo: { name: "antares", version: this.options.clientVersion ?? "0.0.1" },
       capabilities: { requestedCapabilities: [], userInputDialogs: false },
@@ -108,22 +134,65 @@ export class MuseSession extends EventEmitter {
       durability: init.sessionDurability,
     };
     host.notify("initialized");
+    return host;
+  }
 
-    const started = await host.request<{ session?: { sessionId?: string } }>("session/start", {
-      commandId: uuidv7(),
-      workspaceRoot,
-      ...(provider ? {} : { permissionProfile: profile }),
-    });
+  private async doStart(): Promise<void> {
+    const host = await this.ensureHost();
+    const { workspaceRoot, provider } = this.options;
+    const profile = this.profile;
+    const base = { workspaceRoot, ...(provider ? {} : { permissionProfile: profile }) };
+    let started: { session?: { sessionId?: string } };
+    try {
+      started = await host.request("session/start", { commandId: uuidv7(), ...base, ...(this.modelId ? { modelId: this.modelId } : {}) });
+    } catch (error) {
+      if (!(error instanceof MspError) || !this.modelId) throw error;
+      // A remembered model can disappear from the subscription; fall back instead of failing the chat.
+      this.notice("warning", `Model ${this.modelId} is not available; using the default model instead.`);
+      this.modelId = undefined;
+      started = await host.request("session/start", { commandId: uuidv7(), ...base });
+    }
     this.sessionId = started.session?.sessionId;
     if (!this.sessionId) throw new Error("Muse did not return a session id.");
     this.emitEvent({ type: "session", profileId: provider ? undefined : profile, sandbox: this.info.sandbox, version: this.info.version, durability: this.info.durability });
 
     // Best-effort, read-only extras for the header; failures never block chatting.
-    host.request("model/list", {}).then((r) => this.emitEvent({ type: "models", models: mapModels(r) })).catch(() => undefined);
+    void this.refreshModels();
     host.request<{ usage?: unknown }>("usage/read", {}).then((r) => {
       const usage = mapUsage(r.usage);
       if (usage) this.emitEvent(usage);
     }).catch(() => undefined);
+  }
+
+  /** Reads the catalog (with the session's active model flagged when a session exists). */
+  async refreshModels(): Promise<ModelInfo[]> {
+    const host = this.host;
+    if (!host || !host.running) return this.catalog;
+    try {
+      const result = await host.request("model/list", this.sessionId ? { sessionId: this.sessionId } : {});
+      this.catalog = mapModels(result);
+      this.emitEvent({ type: "models", models: this.catalog });
+    } catch {
+      /* the picker simply stays as it was */
+    }
+    return this.catalog;
+  }
+
+  /** Switches the model: before a session exists it is remembered for the start; after, `session/setModel`. */
+  async setModel(modelId: string): Promise<void> {
+    this.modelId = modelId;
+    if (!this.sessionId || !this.host) return;
+    const row = this.catalog.find((m) => m.modelId === modelId);
+    await this.host.request("session/setModel", {
+      commandId: uuidv7(),
+      sessionId: this.sessionId,
+      model: { modelId, ...(row?.providerId ? { providerId: row.providerId } : {}), ...(row?.profileId ? { profileId: row.profileId } : {}), ...(row ? { displayLabel: row.label } : {}) },
+    });
+  }
+
+  /** Sets the reasoning effort sent with each turn; undefined restores the model's default. */
+  setEffort(effort: string | undefined): void {
+    this.effort = effort;
   }
 
   private onNotification(method: string, params: unknown): void {
@@ -136,6 +205,11 @@ export class MuseSession extends EventEmitter {
     }
     if (event.type === "approvalRequested") this.pendingApprovals.add(event.approvalId);
     if (event.type === "approvalResolved") this.pendingApprovals.delete(event.approvalId);
+    if (event.type === "modelChanged") {
+      this.modelId = event.modelId;
+      this.catalog = this.catalog.map((m) => ({ ...m, isActive: m.modelId === event.modelId }));
+      this.emitEvent({ type: "models", models: this.catalog });
+    }
     this.emitEvent(event);
   }
 
@@ -165,6 +239,7 @@ export class MuseSession extends EventEmitter {
       commandId: uuidv7(),
       sessionId: this.sessionId,
       input: [{ type: "text", text }],
+      ...(this.effort ? { reasoningEffort: this.effort } : {}),
     }, 30_000);
   }
 
@@ -192,6 +267,7 @@ export class MuseSession extends EventEmitter {
   async stop(): Promise<void> {
     const host = this.host;
     this.host = undefined;
+    this.hostReady = undefined;
     if (host) await host.stop();
   }
 }

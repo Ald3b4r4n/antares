@@ -17,6 +17,15 @@ const PROFILES = [
   { id: ":unrestricted", label: "Unrestricted", note: "Per the contract this starts without sandbox or approval prompts. Use with care." },
 ];
 let profileId = ":read-only";
+let modelId; // the remembered choice (undefined = default)
+let effort;
+const CATALOG = [
+  { modelId: "muse-wonder-1.0", label: "muse-wonder-1.0", providerId: "meta", profileId: "tbh", isDefault: true, contextLimit: 1007997, variants: ["minimal", "low", "medium", "high", "xhigh", "max"], effortNotes: {}, defaultReasoningEffort: "high" },
+  { modelId: "muse-spark-1.3", label: "muse-spark-1.3", providerId: "meta", profileId: "tbh", isDefault: false, contextLimit: 1007997, variants: ["minimal", "low", "medium", "high", "xhigh", "max"], effortNotes: {}, defaultReasoningEffort: "max" },
+  { modelId: "muse-spark-1.2", label: "muse-spark-1.2", providerId: "meta", profileId: "tbh", isDefault: false, contextLimit: 1007997, variants: ["minimal", "low", "medium", "high", "xhigh"], effortNotes: { xhigh: "Use this for deepest analysis and complex fixes." }, defaultReasoningEffort: "high" },
+];
+const catalog = () => CATALOG.map((m) => ({ ...m, isActive: m.modelId === (modelId ?? "muse-wonder-1.0") }));
+const config = () => ({ type: "config", profileId, profiles: PROFILES, modelId, effort });
 let n = 0;
 const decisions = new Map(); // approvalId -> resolve
 
@@ -98,21 +107,30 @@ window.acquireVsCodeApi = () => ({
   postMessage(m) {
     window.__sent.push(m);
     if (m.type === "ready") {
-      post({ type: "config", profileId, profiles: PROFILES });
+      post(config());
       emit({ type: "session", profileId, sandbox: "unavailable", version: "1.4.14" });
-      emit({ type: "models", models: [{ modelId: "muse-wonder-1.0", label: "muse-wonder-1.0", isDefault: true, variants: ["minimal", "high"] }] });
+      emit({ type: "models", models: catalog() });
+    } else if (m.type === "setModel") {
+      modelId = m.modelId;
+      effort = undefined;
+      emit({ type: "modelChanged", modelId, providerId: "meta", source: "user" });
+      emit({ type: "models", models: catalog() });
+      post(config());
+    } else if (m.type === "setEffort") {
+      effort = m.effort;
+      post(config());
     } else if (m.type === "send") turn(m.text);
     else if (m.type === "decide") decisions.get(m.approvalId)?.({ decision: m.choiceId === "c-deny" ? "denied" : m.choiceId === "c-once" ? "approved" : m.choiceId === "c-session" ? "approvedForSession" : "approvedPolicyAmendment" });
     else if (m.type === "setProfile") {
       profileId = m.profileId;
       post({ type: "reset" });
-      post({ type: "config", profileId, profiles: PROFILES });
+      post(config());
     } else if (m.type === "copy") {
       window.__lastCopied = m.text;
       post({ type: "copied" });
     } else if (m.type === "newChat") {
       post({ type: "reset" });
-      post({ type: "config", profileId, profiles: PROFILES });
+      post(config());
     }
   },
 });

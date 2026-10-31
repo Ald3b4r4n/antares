@@ -11,6 +11,8 @@ type FromWebview =
   | { type: "stop" }
   | { type: "newChat" }
   | { type: "setProfile"; profileId: string }
+  | { type: "setModel"; modelId: string }
+  | { type: "setEffort"; effort?: string }
   | { type: "decide"; approvalId: string; choiceId: string; requirementId: unknown; feedback?: string }
   | { type: "copy"; text: string }
   | { type: "rendered"; messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
@@ -31,6 +33,9 @@ export class ChatPanel {
   private readonly context: vscode.ExtensionContext;
   private session?: MuseSession;
   private profile: string;
+  /** The user's last model/effort choice (undefined = the host's defaults). Remembered across chats. */
+  private modelId?: string;
+  private effort?: string;
   readonly testState: TestState = { ready: 0, events: [] };
 
   static get(): ChatPanel | undefined {
@@ -61,6 +66,8 @@ export class ChatPanel {
     this.context = context;
     const configured = vscode.workspace.getConfiguration("antares").get<string>("initialProfile", READ_ONLY);
     this.profile = KNOWN_PROFILES.has(configured) ? configured : READ_ONLY;
+    this.modelId = context.globalState.get<string>("antares.modelId") || undefined;
+    this.effort = context.globalState.get<string>("antares.effort") || undefined;
     panel.webview.html = this.html();
     panel.webview.onDidReceiveMessage((message: FromWebview) => void this.onMessage(message));
     panel.onDidDispose(() => {
@@ -84,7 +91,32 @@ export class ChatPanel {
   }
 
   private postConfig(): void {
-    this.post({ type: "config", profileId: this.profile, profiles: PROFILES });
+    this.post({ type: "config", profileId: this.profile, profiles: PROFILES, modelId: this.modelId, effort: this.effort });
+  }
+
+  private remember(): void {
+    void this.context.globalState.update("antares.modelId", this.modelId);
+    void this.context.globalState.update("antares.effort", this.effort);
+  }
+
+  private async setModel(modelId: string): Promise<void> {
+    this.modelId = modelId;
+    this.effort = undefined; // tiers differ per model; go back to the new model's default
+    this.remember();
+    this.session?.setEffort(undefined);
+    try {
+      await this.session?.setModel(modelId);
+    } catch (error) {
+      this.notice("error", `The host did not accept the model change: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    this.postConfig();
+  }
+
+  private setEffort(effort: string | undefined): void {
+    this.effort = effort || undefined;
+    this.remember();
+    this.session?.setEffort(this.effort);
+    this.postConfig();
   }
 
   /** Public for tests and for the webview bridge. */
@@ -106,12 +138,19 @@ export class ChatPanel {
       case "setProfile":
         await this.setProfile(message.profileId);
         break;
+      case "setModel":
+        await this.setModel(message.modelId);
+        break;
+      case "setEffort":
+        this.setEffort(message.effort);
+        break;
       case "decide":
         await this.decide(message);
         break;
       case "ready":
         this.testState.ready++;
         this.postConfig();
+        void this.warm();
         break;
       case "rendered":
         this.testState.rendered = { messages: message.messages, userMessages: message.userMessages, codeBlocks: message.codeBlocks, copyButtons: message.copyButtons };
@@ -125,6 +164,18 @@ export class ChatPanel {
     this.profile = profile;
     this.post({ type: "reset" });
     this.postConfig();
+    void this.warm();
+  }
+
+  /** Starts the host quietly so the model picker has a catalog before the first message. No model call. */
+  private async warm(): Promise<void> {
+    const session = this.ensureSession(true);
+    if (!session) return;
+    try {
+      await session.warm();
+    } catch {
+      /* the first message reports any real problem */
+    }
   }
 
   private async setProfile(profileId: string): Promise<void> {
@@ -162,17 +213,17 @@ export class ChatPanel {
     }
   }
 
-  private ensureSession(): MuseSession | undefined {
-    if (this.session?.running) return this.session;
+  private ensureSession(quiet = false): MuseSession | undefined {
+    if (this.session) return this.session;
     const config = vscode.workspace.getConfiguration("antares");
     const binary = locateMuse(config.get<string>("musePath"));
     if (!binary) {
-      this.notice("error", "Muse executable not found. Install Muse Code or set antares.musePath in Settings.");
+      if (!quiet) this.notice("error", "Muse executable not found. Install Muse Code or set antares.musePath in Settings.");
       return undefined;
     }
     const folder = vscode.workspace.workspaceFolders?.[0];
     if (!folder) {
-      this.notice("error", "Open a folder first: Muse works inside a workspace.");
+      if (!quiet) this.notice("error", "Open a folder first: Muse works inside a workspace.");
       return undefined;
     }
     const version = (this.context.extension.packageJSON as { version?: string }).version;
@@ -180,10 +231,26 @@ export class ChatPanel {
       binary,
       workspaceRoot: folder.uri.fsPath,
       profile: this.profile,
+      modelId: this.modelId,
+      effort: this.effort,
       provider: config.get<string>("dev.provider") || undefined,
       clientVersion: version,
     });
-    session.on("event", (event: ChatEvent) => this.post({ type: "event", event }));
+    session.on("event", (event: ChatEvent) => {
+      if (event.type === "models" && this.modelId && event.models.length > 0 && !event.models.some((m) => m.modelId === this.modelId)) {
+        // The remembered model is gone from the catalog: forget it rather than show a stale choice.
+        this.modelId = undefined;
+        this.effort = undefined;
+        this.remember();
+        this.postConfig();
+      }
+      if (event.type === "modelChanged" && event.modelId !== this.modelId) {
+        this.modelId = event.modelId;
+        this.remember();
+        this.postConfig();
+      }
+      this.post({ type: "event", event });
+    });
     session.on("exit", (code: number | null) => {
       if (this.session === session) {
         this.session = undefined;

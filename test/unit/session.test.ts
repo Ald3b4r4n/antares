@@ -2,12 +2,13 @@
 // the session answers the host's request with a receipt, hands the offered choices to the UI, and
 // sends back exactly the user's pick with the host's own requirementId. It never decides by itself.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ChatEvent } from "../../src/muse/events.ts";
 import { MuseSession } from "../../src/muse/session.ts";
+import { readReport } from "../fixtures/report.ts";
 
 const fake = new URL("../fixtures/fake-muse.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -31,7 +32,7 @@ function run(profile: string, mode?: string) {
   });
   const events: ChatEvent[] = [];
   session.on("event", (e: ChatEvent) => events.push(e));
-  const report = () => JSON.parse(readFileSync(reportPath, "utf8")) as { argv: string[]; startParams: Record<string, unknown>; receipts: unknown[]; decides: Record<string, unknown>[]; interrupts: number };
+  const report = () => readReport(reportPath);
   const done = async () => {
     await session.stop();
     rmSync(dir, { recursive: true, force: true });
@@ -49,6 +50,7 @@ test("approval relay: receipt, offered choices, and the exact pick sent back", a
     // Nothing is decided until the UI says so.
     await new Promise((r) => setTimeout(r, 200));
     assert.equal(t.report().decides.length, 0, "the session must not decide on its own");
+    await until(() => t.report().receipts.length === 1, "the presentation receipt to reach the host");
     assert.deepEqual(t.report().receipts, [{}], "the host got a presentation receipt");
 
     await t.session.decide(req.approvalId, "c-deny", req.requirementId, "not that folder");
@@ -71,7 +73,7 @@ test("profile: :ask-me starts without the hard-disable flags; :read-only adds th
   const ask = run(":ask-me");
   try {
     await ask.session.start();
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => ask.report().startParams.permissionProfile !== undefined, "session/start");
     assert.equal(ask.report().startParams.permissionProfile, ":ask-me");
     assert.ok(!ask.report().argv.includes("--disable-shell"));
   } finally {
@@ -80,7 +82,7 @@ test("profile: :ask-me starts without the hard-disable flags; :read-only adds th
   const ro = run(":read-only");
   try {
     await ro.session.start();
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => ro.report().startParams.permissionProfile !== undefined, "session/start");
     assert.equal(ro.report().startParams.permissionProfile, ":read-only");
     assert.ok(ro.report().argv.includes("--disable-shell") && ro.report().argv.includes("--disable-write"));
   } finally {

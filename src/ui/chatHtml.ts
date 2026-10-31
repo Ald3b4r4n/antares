@@ -35,6 +35,12 @@ export function chatHtml(options: ChatHtmlOptions): string {
 </div>
 <footer>
   <div id="meta"></div>
+  <div class="controls">
+    <label for="model">Model</label>
+    <select id="model" title="Model for this chat. Takes effect on the next message."></select>
+    <label for="effort">Effort</label>
+    <select id="effort" title="Reasoning effort sent with each message"></select>
+  </div>
   <div class="composer">
     <textarea id="input" rows="1" placeholder="Message Muse…" aria-label="Message"></textarea>
     <button id="send" class="primary">Send</button>

@@ -49,3 +49,14 @@ Setup: `scripts/probe-approval.ts`, the user's normal environment, an empty thro
 - **Session object.** On this (stable) connection `session/start` returned no `permissionState`; the profile is therefore taken from what was requested, not read back.
 
 Consequences for the UI: show every tool call and its outcome, show the host-reported sandbox state next to the profile, and describe profiles only with what was observed or published.
+
+## Observed: model catalog and switching (no model call)
+
+Setup: `scripts/probe-model.ts`, the user's normal environment, `:read-only` with shell and writes disabled, an empty throwaway workspace. It lists models, switches the model with `session/setModel`, lists again, restores the model and sets a reasoning effort. No turn was sent, so no tokens were spent. It did leave one empty session in the user's real session history.
+
+- **`model/list` works before any session exists** (params `{}`): `source: "providerCatalog"`, three rows for provider `meta`. Antares therefore starts the host without a session ("warm-up") to fill the picker before the first message. Warming makes no model call.
+- **Row fields:** `modelId, displayLabel, providerId, profileId, releaseDate, description, contextLimit, outputLimit, cost, isActive, isDefault, variants, reasoningEffortVariants, defaultReasoningEffort`. `cost` was `null`. `isActive` is only set when `sessionId` is passed; with none, no row is active.
+- **`session/start`** returns `session.modelId` (the default model when none was asked for) and `providerId`.
+- **`session/setModel`** takes `{commandId, sessionId, model: {modelId, providerId?, profileId?, displayLabel?}}`, answers `{status: "accepted"}`, and the host broadcasts `session/modelChanged` `{modelId, providerId, source: "user"}`. A later `model/list` with the session id flips `isActive`.
+- **`session/setReasoningEffort`** is accepted and broadcasts `session/reasoningEffortChanged` `{reasoningEffort, source: "user"}`. Antares does not use the session default: it sends `reasoningEffort` on `turn/start` only when the user picked one, so "Default" means the model's own default. The tiers offered are the row's `variants` (they differ per model; one model lacked `max`).
+- **Not observed:** what a turn does with a non-default effort, and a `session/start` refused for an unknown `modelId` (Antares retries without the model and says so; that path is covered only by a fake-host test).

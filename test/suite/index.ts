@@ -24,6 +24,10 @@ export async function run(): Promise<void> {
   assert.ok(panel, "chat panel was created");
   await waitFor("chat.js to run in the real webview (ready message)", () => panel.testState.ready >= 1, 20_000);
 
+  // Warming: the model catalog reaches the page before the first message, with no session yet.
+  await waitFor("the model catalog (host warm-up)", () => panel.testState.events.some((e) => e.type === "models"), 20_000);
+  assert.ok(!panel.testState.events.some((e) => e.type === "userMessage"), "nothing was sent yet");
+
   await panel.send("hello from the extension host");
   await waitFor("turn to complete and the page to confirm rendering", () => panel.testState.rendered !== undefined, 30_000);
 

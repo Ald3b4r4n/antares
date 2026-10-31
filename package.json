@@ -85,7 +85,7 @@
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
     "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
-    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts"
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

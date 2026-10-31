@@ -9,9 +9,15 @@
 export interface ModelInfo {
   modelId: string;
   label: string;
+  providerId?: string;
+  profileId?: string;
   isDefault: boolean;
+  isActive: boolean;
   contextLimit?: number;
+  /** Selectable reasoning-effort tiers, in the catalog's order. */
   variants: string[];
+  /** Catalog display strings for some tiers (tier -> description). */
+  effortNotes: Record<string, string>;
   defaultReasoningEffort?: string;
 }
 
@@ -80,6 +86,8 @@ export type ChatEvent =
       weeklyResetsAtMs?: number;
     }
   | { type: "models"; models: ModelInfo[] }
+  | { type: "modelChanged"; modelId: string; providerId?: string; source: string }
+  | { type: "effortChanged"; effort: string; source: string }
   | { type: "activity"; itemId: string; kind: string; label?: string; status: string }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
   | { type: "session"; profileId?: string; sandbox?: string; version?: string; durability?: string }
@@ -176,6 +184,14 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
       if (str(params.field) !== "text" || !itemId || delta === undefined) return undefined;
       return { type: "assistantDelta", itemId, delta };
     }
+    case "session/modelChanged": {
+      const modelId = str(params.modelId);
+      return modelId ? { type: "modelChanged", modelId, providerId: str(params.providerId), source: str(params.source) ?? "unknown" } : undefined;
+    }
+    case "session/reasoningEffortChanged": {
+      const effort = str(params.reasoningEffort);
+      return effort ? { type: "effortChanged", effort, source: str(params.source) ?? "unknown" } : undefined;
+    }
     case "approval/requested":
       return mapApprovalRequest(params);
     case "approval/resolved": {
@@ -241,12 +257,22 @@ export function mapModels(result: unknown): ModelInfo[] {
     if (!isObj(row)) continue;
     const modelId = str(row.modelId);
     if (!modelId) continue;
+    const effortNotes: Record<string, string> = {};
+    if (Array.isArray(row.reasoningEffortVariants)) {
+      for (const v of row.reasoningEffortVariants) {
+        if (isObj(v) && str(v.tier) && str(v.description)) effortNotes[str(v.tier) as string] = str(v.description) as string;
+      }
+    }
     models.push({
       modelId,
       label: str(row.displayLabel) ?? modelId,
+      providerId: str(row.providerId),
+      profileId: str(row.profileId),
       isDefault: row.isDefault === true,
+      isActive: row.isActive === true,
       contextLimit: num(row.contextLimit),
       variants: Array.isArray(row.variants) ? row.variants.filter((v): v is string => typeof v === "string") : [],
+      effortNotes,
       defaultReasoningEffort: str(row.defaultReasoningEffort),
     });
   }

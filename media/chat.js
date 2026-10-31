@@ -9,6 +9,8 @@
   const meta = $("meta");
   const profileSel = $("profile");
   const hint = $("hint");
+  const modelSel = $("model");
+  const effortSel = $("effort");
 
   const COPY_ICON =
     '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor"/><path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" fill="none" stroke="currentColor"/></svg>';
@@ -19,6 +21,8 @@
     tools: new Map(), // itemId -> element
     approvals: new Map(), // approvalId -> { el, event, decided }
     models: [],
+    modelId: undefined, // the user's remembered choice, if any
+    effort: undefined, // undefined = the model's default
     tokens: undefined,
     context: undefined,
     usage: undefined,
@@ -238,8 +242,8 @@
       parts.push('<span class="' + (risky ? "warn" : "") + '">' + escapeHtml(state.profileId) + "</span>");
       if (state.sandbox) parts.push('<span class="' + (sandboxBad && risky ? "warn" : "") + '" title="Reported by the Muse host at startup">sandbox ' + escapeHtml(state.sandbox) + "</span>");
     }
-    const model = (state.models.find((m) => m.isDefault) || state.models[0] || {}).label;
-    if (model) parts.push("<span>" + escapeHtml(model) + "</span>");
+    const model = currentModel();
+    if (model) parts.push("<span>" + escapeHtml(model.label) + (state.effort ? " · " + escapeHtml(state.effort) : "") + "</span>");
     if (state.context) {
       const c = state.context;
       const p = c.windowTokens ? Math.round((c.usedTokens / c.windowTokens) * 100) : 0;
@@ -253,9 +257,57 @@
     if (state.turnNote) parts.push("<span>" + escapeHtml(state.turnNote) + "</span>");
     meta.innerHTML = parts.filter(Boolean).join("");
   }
+  // ---- model and effort ----
+  // The shown model is the remembered choice if the catalog still has it, else the host's active
+  // model, else the catalog default, else the first row.
+  function currentModel() {
+    const byId = (id) => state.models.find((m) => m.modelId === id);
+    return (state.modelId && byId(state.modelId)) || state.models.find((m) => m.isActive) || state.models.find((m) => m.isDefault) || state.models[0];
+  }
+  function renderModelControls() {
+    modelSel.replaceChildren();
+    effortSel.replaceChildren();
+    if (state.models.length === 0) {
+      const none = el("option", "", "No models (log in with the official client)");
+      none.value = "";
+      modelSel.append(none);
+      modelSel.disabled = true;
+      effortSel.disabled = true;
+      return;
+    }
+    const model = currentModel();
+    for (const m of state.models) {
+      const ctx = m.contextLimit ? " · " + fmtTokens(m.contextLimit) + " ctx" : "";
+      const opt = el("option", "", m.label + ctx);
+      opt.value = m.modelId;
+      modelSel.append(opt);
+    }
+    modelSel.value = model.modelId;
+    const dflt = el("option", "", "Default" + (model.defaultReasoningEffort ? " (" + model.defaultReasoningEffort + ")" : ""));
+    dflt.value = "";
+    effortSel.append(dflt);
+    for (const tier of model.variants) {
+      const opt = el("option", "", tier);
+      opt.value = tier;
+      if (model.effortNotes[tier]) opt.title = model.effortNotes[tier];
+      effortSel.append(opt);
+    }
+    effortSel.value = state.effort && model.variants.includes(state.effort) ? state.effort : "";
+    modelSel.disabled = state.running;
+    effortSel.disabled = state.running || model.variants.length === 0;
+  }
+  modelSel.addEventListener("change", () => {
+    if (modelSel.value) vscode.postMessage({ type: "setModel", modelId: modelSel.value });
+  });
+  effortSel.addEventListener("change", () => {
+    vscode.postMessage({ type: "setEffort", effort: effortSel.value || undefined });
+  });
+
   function setRunning(running, text) {
     state.running = running;
     state.statusText = text;
+    modelSel.disabled = running || state.models.length === 0;
+    effortSel.disabled = running || state.models.length === 0;
     sendBtn.disabled = running;
     stopBtn.hidden = !running;
     sendBtn.hidden = running;
@@ -266,6 +318,9 @@
   function applyConfig(msg) {
     state.profileId = msg.profileId;
     state.profiles = msg.profiles || [];
+    state.modelId = msg.modelId;
+    state.effort = msg.effort;
+    renderModelControls();
     profileSel.replaceChildren();
     for (const p of state.profiles) {
       const opt = el("option", "", p.label + " (" + p.id + ")");
@@ -365,6 +420,7 @@
         break;
       case "models":
         state.models = e.models;
+        renderModelControls();
         renderMeta();
         break;
       case "activity":
