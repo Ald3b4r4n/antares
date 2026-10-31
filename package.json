@@ -1,0 +1,62 @@
+{
+  "name": "antares",
+  "displayName": "Antares",
+  "description": "Open-source editor interface for the Muse Code agent, built on the official Muse Server Protocol (MSP).",
+  "version": "0.0.1",
+  "publisher": "ald3b4r4n",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "muse",
+    "muse code",
+    "agent",
+    "chat",
+    "msp"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "antares.open",
+        "title": "Antares: Open"
+      },
+      {
+        "command": "antares.selfTest",
+        "title": "Antares: Run offline self-test"
+      }
+    ],
+    "configuration": {
+      "title": "Antares",
+      "properties": {
+        "antares.musePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `muse` executable. Leave empty to auto-detect (PATH, then the default install location)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "spike": "node scripts/spike.ts",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.0"
+  }
+}

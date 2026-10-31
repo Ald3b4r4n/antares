@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Antares">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffb199" stop-opacity="0.95"/>
+      <stop offset="0.35" stop-color="#e8412b" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#e8412b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="64" cy="64" r="62" fill="url(#glow)"/>
+  <path d="M64 8 L71 57 L120 64 L71 71 L64 120 L57 71 L8 64 L57 57 Z" fill="#ff5a3c"/>
+  <circle cx="64" cy="64" r="9" fill="#fff1ec"/>
+</svg>
