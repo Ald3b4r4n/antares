@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
-import type { ChatEvent } from "../muse/events.ts";
+import { PROFILES, type ChatEvent } from "../muse/events.ts";
 import { locateMuse } from "../muse/locate.ts";
-import { MuseSession } from "../muse/session.ts";
+import { MuseSession, READ_ONLY } from "../muse/session.ts";
 import { chatHtml } from "./chatHtml.ts";
 
 type FromWebview =
@@ -10,6 +10,8 @@ type FromWebview =
   | { type: "send"; text: string }
   | { type: "stop" }
   | { type: "newChat" }
+  | { type: "setProfile"; profileId: string }
+  | { type: "decide"; approvalId: string; choiceId: string; requirementId: unknown; feedback?: string }
   | { type: "copy"; text: string }
   | { type: "rendered"; messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
 
@@ -20,12 +22,15 @@ export interface TestState {
   rendered?: { messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
 }
 
+const KNOWN_PROFILES = new Set(PROFILES.map((p) => p.id));
+
 /** The Antares chat panel: one webview, one Muse session at a time. */
 export class ChatPanel {
   private static current: ChatPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
   private session?: MuseSession;
+  private profile: string;
   readonly testState: TestState = { ready: 0, events: [] };
 
   static get(): ChatPanel | undefined {
@@ -54,6 +59,8 @@ export class ChatPanel {
   private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
     this.panel = panel;
     this.context = context;
+    const configured = vscode.workspace.getConfiguration("antares").get<string>("initialProfile", READ_ONLY);
+    this.profile = KNOWN_PROFILES.has(configured) ? configured : READ_ONLY;
     panel.webview.html = this.html();
     panel.webview.onDidReceiveMessage((message: FromWebview) => void this.onMessage(message));
     panel.onDidDispose(() => {
@@ -76,6 +83,10 @@ export class ChatPanel {
     this.post({ type: "event", event: { type: "notice", level, text } satisfies ChatEvent });
   }
 
+  private postConfig(): void {
+    this.post({ type: "config", profileId: this.profile, profiles: PROFILES });
+  }
+
   /** Public for tests and for the webview bridge. */
   async onMessage(message: FromWebview): Promise<void> {
     switch (message.type) {
@@ -90,16 +101,64 @@ export class ChatPanel {
         await this.session?.interrupt();
         break;
       case "newChat":
-        await this.session?.stop();
-        this.session = undefined;
-        this.post({ type: "reset" });
+        await this.restart(this.profile);
+        break;
+      case "setProfile":
+        await this.setProfile(message.profileId);
+        break;
+      case "decide":
+        await this.decide(message);
         break;
       case "ready":
         this.testState.ready++;
+        this.postConfig();
         break;
       case "rendered":
         this.testState.rendered = { messages: message.messages, userMessages: message.userMessages, codeBlocks: message.codeBlocks, copyButtons: message.copyButtons };
         break;
+    }
+  }
+
+  private async restart(profile: string): Promise<void> {
+    await this.session?.stop();
+    this.session = undefined;
+    this.profile = profile;
+    this.post({ type: "reset" });
+    this.postConfig();
+  }
+
+  private async setProfile(profileId: string): Promise<void> {
+    if (!KNOWN_PROFILES.has(profileId) || profileId === this.profile) {
+      this.postConfig();
+      return;
+    }
+    if (profileId !== READ_ONLY) {
+      const strong = profileId === ":unrestricted";
+      const detail = strong
+        ? "Per the Muse contract this profile starts without sandbox or approval prompts. The agent can then act with your user's permissions."
+        : "The agent may use shell and file-write tools. Read what the profile note says about what it does and does not ask for.";
+      const choice = await vscode.window.showWarningMessage(
+        `Start a new chat with the ${profileId} profile?`,
+        { modal: true, detail: `${detail}\n\nSwitching profile ends the current chat.` },
+        "Start new chat",
+      );
+      if (choice !== "Start new chat") {
+        this.postConfig();
+        return;
+      }
+    }
+    await this.restart(profileId);
+  }
+
+  private async decide(message: Extract<FromWebview, { type: "decide" }>): Promise<void> {
+    if (!this.session) {
+      this.notice("error", "There is no active session to receive that decision.");
+      return;
+    }
+    try {
+      await this.session.decide(message.approvalId, message.choiceId, message.requirementId, message.feedback);
+    } catch (error) {
+      this.notice("error", `The host did not accept the decision: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -120,7 +179,7 @@ export class ChatPanel {
     const session = new MuseSession({
       binary,
       workspaceRoot: folder.uri.fsPath,
-      safeMode: config.get<boolean>("safeMode", true),
+      profile: this.profile,
       provider: config.get<string>("dev.provider") || undefined,
       clientVersion: version,
     });
@@ -148,11 +207,6 @@ export class ChatPanel {
   private html(): string {
     const webview = this.panel.webview;
     const media = (file: string) => webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", file)).toString();
-    return chatHtml({
-      cspSource: webview.cspSource,
-      nonce: randomBytes(16).toString("hex"),
-      mediaUri: media,
-      safeMode: vscode.workspace.getConfiguration("antares").get<boolean>("safeMode", true),
-    });
+    return chatHtml({ cspSource: webview.cspSource, nonce: randomBytes(16).toString("hex"), mediaUri: media });
   }
 }

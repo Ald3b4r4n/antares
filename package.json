@@ -51,15 +51,27 @@
           "default": "",
           "markdownDescription": "Absolute path to the `muse` executable. Leave empty to auto-detect (PATH, then the default install location)."
         },
-        "antares.safeMode": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Start Muse with shell and file-write tools disabled and the `:read-only` profile. Approvals are not implemented yet, so turning this off lets the agent act without an approval prompt in Antares. Keep it on until the approvals phase lands."
-        },
         "antares.dev.provider": {
           "type": "string",
           "default": "",
           "markdownDescription": "Development only: Muse provider id (e.g. `echo`) for offline testing. Leave empty for normal use."
+        },
+        "antares.initialProfile": {
+          "type": "string",
+          "default": ":read-only",
+          "enum": [
+            ":read-only",
+            ":ask-me",
+            ":auto-review",
+            ":unrestricted"
+          ],
+          "enumDescriptions": [
+            "Reading only; shell and file-write tools are also disabled at the host (recommended).",
+            "Human review profile.",
+            "Automated reviewer decides first and escalates to you.",
+            "Per the Muse contract: no sandbox, no approval prompts. Use with care."
+          ],
+          "markdownDescription": "Permission profile a new Antares chat starts with. You can change it per chat from the header; changing it starts a new chat."
         }
       }
     }
@@ -72,7 +84,8 @@
     "package": "vsce package --no-dependencies",
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
-    "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs"
+    "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -14,7 +14,7 @@ const mock = await readFile(new URL("./preview-mock.js", import.meta.url), "utf8
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (url.pathname === "/") {
-    const html = chatHtml({ cspSource: "'self'", nonce: "preview", mediaUri: (f) => `/media/${f}`, safeMode: true, preScript: mock });
+    const html = chatHtml({ cspSource: "'self'", nonce: "preview", mediaUri: (f) => `/media/${f}`, preScript: mock });
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(html);
     return;
   }

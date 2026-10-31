@@ -7,6 +7,8 @@
   const sendBtn = $("send");
   const stopBtn = $("stop");
   const meta = $("meta");
+  const profileSel = $("profile");
+  const hint = $("hint");
 
   const COPY_ICON =
     '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor"/><path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" fill="none" stroke="currentColor"/></svg>';
@@ -14,7 +16,8 @@
   const state = {
     running: false,
     items: new Map(), // itemId -> { el, text, role, raf }
-    model: undefined,
+    tools: new Map(), // itemId -> element
+    approvals: new Map(), // approvalId -> { el, event, decided }
     models: [],
     tokens: undefined,
     context: undefined,
@@ -22,9 +25,18 @@
     background: new Set(),
     turnNote: "",
     statusText: "Ready",
+    profileId: undefined,
+    profiles: [],
+    sandbox: undefined,
   };
 
   const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
 
   // ---- tiny, safe markdown: fenced code, inline code, bold, paragraphs ----
   function inline(text) {
@@ -42,12 +54,11 @@
       const lang = m[1] || "text";
       const code = m[2].replace(/\n$/, "");
       out.push(
-        '<div class="code"><div class="code-head"><span>' + escapeHtml(lang) + '</span>' +
+        '<div class="code"><div class="code-head"><span>' + escapeHtml(lang) + "</span>" +
           '<button class="copy" data-copy="code" title="Copy code">' + COPY_ICON + '<span class="label">Copy</span></button></div>' +
           "<pre><code>" + escapeHtml(code) + "</code></pre></div>",
       );
       last = fence.lastIndex;
-      if (m[0] === "" ) fence.lastIndex++;
     }
     if (last < text.length) out.push(paragraphs(text.slice(last)));
     return out.join("");
@@ -67,19 +78,21 @@
   function scrollDown() {
     messages.scrollTop = messages.scrollHeight;
   }
-  function addMessage(itemId, role, text, streaming) {
+  function append(node) {
     const stick = pinned();
-    const el = document.createElement("div");
-    el.className = "msg " + role + (streaming ? " streaming" : "");
-    el.innerHTML =
+    messages.appendChild(node);
+    if (stick) scrollDown();
+  }
+  function addMessage(itemId, role, text, streaming) {
+    const node = el("div", "msg " + role + (streaming ? " streaming" : ""));
+    node.innerHTML =
       '<div class="msg-head"><span class="who">' + (role === "user" ? "You" : "Muse") + "</span>" +
       '<button class="copy" data-copy="message" title="Copy message">' + COPY_ICON + '<span class="label">Copy</span></button></div>' +
       '<div class="body"></div>';
-    messages.appendChild(el);
-    const item = { el, text, role, raf: 0 };
+    const item = { el: node, text, role, raf: 0 };
     state.items.set(itemId, item);
     paint(item);
-    if (stick) scrollDown();
+    append(node);
     return item;
   }
   function paint(item) {
@@ -97,11 +110,109 @@
     });
   }
   function addNotice(level, text) {
-    const el = document.createElement("div");
-    el.className = "notice " + level;
-    el.textContent = text;
-    messages.appendChild(el);
-    scrollDown();
+    append(el("div", "notice " + level, text));
+  }
+
+  // ---- tool calls ----
+  function upsertTool(e) {
+    let node = state.tools.get(e.itemId);
+    if (!node) {
+      node = el("div", "tool");
+      state.tools.set(e.itemId, node);
+      append(node);
+    }
+    node.className = "tool " + (e.failure ? "failed" : e.status === "completed" ? "done" : "running");
+    node.replaceChildren();
+    const head = el("div", "tool-head");
+    head.append(el("span", "tool-name", e.tool), el("span", "tool-summary", e.summary), el("span", "badge", e.failure ? "failed" : e.status));
+    node.append(head);
+    if (e.held) node.append(el("div", "tool-note", "held" + (e.heldFor ? " for " + e.heldFor : "")));
+    if (e.failure) node.append(el("div", "tool-fail", e.failure));
+    if (e.output) {
+      const details = el("details", "tool-out");
+      details.append(el("summary", "", "output"), el("pre", "", e.output));
+      node.append(details);
+    }
+  }
+
+  // ---- approvals ----
+  function choiceClass(decision) {
+    if (/^approved/.test(decision)) return "allow";
+    if (/^denied|abort|timedOut/.test(decision)) return "deny";
+    return "other";
+  }
+  function scopeLabel(scope) {
+    if (scope === "session") return "for this session";
+    if (scope === "localPersistent") return "saves a permanent rule";
+    return "once";
+  }
+  function addApproval(e) {
+    if (state.approvals.has(e.approvalId)) return;
+    const node = el("div", "approval pending");
+    const head = el("div", "approval-head");
+    head.append(el("span", "approval-title", "Approval needed"), el("span", "badge", e.subject.kind));
+    node.append(head);
+    node.append(el("pre", "approval-subject", e.subject.summary));
+    if (e.subject.detail.length) {
+      const list = el("ul", "approval-detail");
+      for (const line of e.subject.detail) list.append(el("li", "", line));
+      node.append(list);
+    }
+    if (e.subject.generic) node.append(el("div", "approval-flag", "Antares does not recognize this kind of request. Read it carefully; it is never approved automatically."));
+    if (e.protectedWrite) node.append(el("div", "approval-flag", "This guards a write to a protected file. Only allow-once and reject are offered."));
+    if (e.judgeEscalated) node.append(el("div", "approval-flag", "An automated reviewer passed this to you" + (e.reviewerReason ? ": " + e.reviewerReason : ".")));
+
+    let feedback;
+    if (e.choices.some((c) => c.acceptsFeedback)) {
+      feedback = el("input", "approval-feedback");
+      feedback.type = "text";
+      feedback.placeholder = "Optional note to the model (used by choices that accept it)";
+      node.append(feedback);
+    }
+    const choicesEl = el("div", "approval-choices");
+    for (const choice of e.choices) {
+      const b = el("button", "choice " + choiceClass(choice.decision));
+      b.append(el("span", "choice-label", choice.label), el("span", "choice-scope", scopeLabel(choice.scope)));
+      if (choice.rulePreview) b.title = choice.rulePreview;
+      b.addEventListener("click", () => decide(e, choice, feedback));
+      choicesEl.append(b);
+      if (choice.rulePreview) choicesEl.append(el("div", "rule-preview", choice.rulePreview));
+    }
+    node.append(choicesEl);
+    state.approvals.set(e.approvalId, { el: node, event: e, decided: false });
+    append(node);
+    setRunning(true, "Waiting for your approval…");
+  }
+  function decide(e, choice, feedbackInput) {
+    const entry = state.approvals.get(e.approvalId);
+    if (!entry || entry.decided) return;
+    entry.decided = true;
+    for (const b of entry.el.querySelectorAll("button.choice")) b.disabled = true;
+    entry.el.append(el("div", "approval-sent", "Decision sent: " + choice.label));
+    const feedback = choice.acceptsFeedback && feedbackInput && feedbackInput.value.trim() ? feedbackInput.value.trim() : undefined;
+    vscode.postMessage({ type: "decide", approvalId: e.approvalId, choiceId: choice.choiceId, requirementId: e.requirementId, feedback });
+  }
+  function resolveApproval(e) {
+    const entry = state.approvals.get(e.approvalId);
+    if (!entry) return;
+    entry.decided = true;
+    entry.el.className = "approval resolved " + (e.policyResult === "allow" ? "allowed" : "denied");
+    entry.el.querySelector(".approval-choices")?.remove();
+    entry.el.querySelector(".approval-feedback")?.remove();
+    entry.el.querySelector(".approval-sent")?.remove();
+    entry.el.append(el("div", "approval-outcome", (e.policyResult === "allow" ? "Allowed" : "Denied") + " · " + e.decision + " · by " + e.resolvedBy));
+    entry.el.querySelector(".approval-title").textContent = "Approval";
+    if (state.running && ![...state.approvals.values()].some((a) => !a.decided)) setRunning(true, "Working…");
+  }
+  function closePendingApprovals() {
+    for (const entry of state.approvals.values()) {
+      if (entry.decided) continue;
+      entry.decided = true;
+      entry.el.className = "approval resolved denied";
+      entry.el.querySelector(".approval-choices")?.remove();
+      entry.el.querySelector(".approval-feedback")?.remove();
+      entry.el.append(el("div", "approval-outcome", "No longer pending: the turn ended."));
+    }
   }
 
   // ---- footer ----
@@ -121,7 +232,13 @@
   function renderMeta() {
     const parts = [];
     parts.push("<span>" + escapeHtml(state.statusText) + (state.background.size ? " · background " + state.background.size : "") + "</span>");
-    const model = state.model || (state.models.find((m) => m.isDefault) || state.models[0] || {}).label;
+    if (state.profileId) {
+      const risky = state.profileId !== ":read-only";
+      const sandboxBad = state.sandbox && state.sandbox !== "available";
+      parts.push('<span class="' + (risky ? "warn" : "") + '">' + escapeHtml(state.profileId) + "</span>");
+      if (state.sandbox) parts.push('<span class="' + (sandboxBad && risky ? "warn" : "") + '" title="Reported by the Muse host at startup">sandbox ' + escapeHtml(state.sandbox) + "</span>");
+    }
+    const model = (state.models.find((m) => m.isDefault) || state.models[0] || {}).label;
     if (model) parts.push("<span>" + escapeHtml(model) + "</span>");
     if (state.context) {
       const c = state.context;
@@ -144,6 +261,27 @@
     sendBtn.hidden = running;
     renderMeta();
   }
+
+  // ---- profile ----
+  function applyConfig(msg) {
+    state.profileId = msg.profileId;
+    state.profiles = msg.profiles || [];
+    profileSel.replaceChildren();
+    for (const p of state.profiles) {
+      const opt = el("option", "", p.label + " (" + p.id + ")");
+      opt.value = p.id;
+      profileSel.append(opt);
+    }
+    profileSel.value = state.profileId;
+    const current = state.profiles.find((p) => p.id === state.profileId);
+    hint.textContent = (current ? "Profile " + current.id + ": " + current.note + " " : "") + "Enter sends · Shift+Enter adds a line.";
+    renderMeta();
+  }
+  profileSel.addEventListener("change", () => {
+    const wanted = profileSel.value;
+    profileSel.value = state.profileId; // stays put until the extension confirms with a new config
+    vscode.postMessage({ type: "setProfile", profileId: wanted });
+  });
 
   // ---- events from the extension ----
   function onEvent(e) {
@@ -173,6 +311,15 @@
         paint(item);
         break;
       }
+      case "toolCall":
+        upsertTool(e);
+        break;
+      case "approvalRequested":
+        addApproval(e);
+        break;
+      case "approvalResolved":
+        resolveApproval(e);
+        break;
       case "foregroundCompleted":
         setRunning(true, "Finishing background tasks…");
         break;
@@ -186,6 +333,7 @@
           addNotice(e.terminal === "cancelled" || e.terminal === "interrupted" ? "info" : "error", text);
         }
         for (const item of state.items.values()) item.el.classList.remove("streaming");
+        closePendingApprovals();
         state.background.clear();
         setRunning(false, "Ready");
         input.focus();
@@ -198,6 +346,11 @@
         });
         break;
       }
+      case "session":
+        state.sandbox = e.sandbox;
+        if (e.profileId) state.profileId = e.profileId;
+        renderMeta();
+        break;
       case "tokens":
         state.tokens = e;
         renderMeta();
@@ -231,10 +384,14 @@
     const msg = ev.data;
     if (!msg) return;
     if (msg.type === "event") onEvent(msg.event);
+    else if (msg.type === "config") applyConfig(msg);
     else if (msg.type === "reset") {
-      for (const el of messages.querySelectorAll(".msg, .notice")) el.remove();
+      for (const node of messages.querySelectorAll(".msg, .notice, .tool, .approval")) node.remove();
       state.items.clear();
+      state.tools.clear();
+      state.approvals.clear();
       state.tokens = state.context = undefined;
+      state.sandbox = undefined;
       state.turnNote = "";
       setRunning(false, "Ready");
     } else if (msg.type === "copied") {

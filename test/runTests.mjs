@@ -16,7 +16,7 @@ const root = resolve(import.meta.dirname, "..");
 const work = mkdtempSync(join(tmpdir(), `antares-it-${label}-`));
 const workspace = join(work, "workspace");
 mkdirSync(join(workspace, ".vscode"), { recursive: true });
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify({ "antares.dev.provider": "echo", "antares.safeMode": true, "security.workspace.trust.enabled": false }, null, 2));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify({ "antares.dev.provider": "echo", "security.workspace.trust.enabled": false }, null, 2));
 const muse = join(work, "muse-home");
 mkdirSync(join(muse, "config"), { recursive: true });
 mkdirSync(join(muse, "data"), { recursive: true });

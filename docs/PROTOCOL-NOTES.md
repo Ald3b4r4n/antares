@@ -36,3 +36,16 @@ Setup: `scripts/probe-turn.ts --real-env`: the user's normal environment, `--dis
 
 - Never infer login from a file; ask the host (`account/read`: `accountLogin` when logged in, `loggedOut` otherwise), and offer `account/loginStart` (device code) when `loggedOut`.
 - Treat `turn/completed.terminal !== "completed"` as a failure and show `error.message`. A turn can end quickly without any model call.
+
+## Observed: permission profiles, tools and the sandbox (two minimal real turns)
+
+Setup: `scripts/probe-approval.ts`, the user's normal environment, an empty throwaway workspace, profile `:ask-me`, one real turn each (about 44.6k tokens per turn). The script was deny-only; it never had anything to deny, because no approval was requested.
+
+- **No `approval/request` was seen in either turn.** The approval shapes in `src/muse/events.ts` come from the exported schema only, and are covered by tests against a fake host (`test/`), not against a real request.
+- **The sandbox reported unavailable.** `muse serve` in the user's normal environment reported `sandboxAvailability: "unavailable"`, while `muse sandbox windows check` run at the same time printed `status=ready`. The two are not the same check. Why they differ is unknown.
+- **Shell fails closed without the sandbox.** The shell tool is named `powershell`, with args `{command, description}`. Under `:ask-me` it failed with `environment failure: sandbox enforcement unavailable: windows_elevated setup_required: windows elevated sandbox setup has not run`, and the failure text says the command was never started. No approval was requested.
+- **File writes inside the workspace ran without a prompt under `:ask-me`.** The `write_file` tool (args `{path, content}`) completed with `wrote 5 bytes to <path>`, in the throwaway workspace. So "ask me" does not mean "asks for everything"; what it asks for is decided by the host's policy, and Antares does not try to predict it.
+- **Tool-call items.** `item/started`, `item/updated`, `item/completed` with `kind: "toolCall"` carry `tool`, `callId`, `args` (a JSON string), `held` and `heldFor` (seen: `held: true`, `heldFor: "hook"`, i.e. a user hook ran first), and on completion `failureReason` and/or `visibleOutput`.
+- **Session object.** On this (stable) connection `session/start` returned no `permissionState`; the profile is therefore taken from what was requested, not read back.
+
+Consequences for the UI: show every tool call and its outcome, show the host-reported sandbox state next to the profile, and describe profiles only with what was observed or published.

@@ -11,7 +11,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: phase 1 in progress.** Chat with streaming works (read-only, safe mode). Approvals, model picker, sessions and the usage panel are next. See the [roadmap](#roadmap).
+> **Status: phase 1 in progress.** Chat with streaming, tool-call cards, an approval UI and a per-chat permission profile work. The approval UI was built from the protocol schema and is tested against a fake host; **no real approval request has been observed yet**. See the [roadmap](#roadmap).
 
 > **Unofficial.** Antares is an independent community project. It is not made, endorsed or supported by Meta or the Muse Code team. "Muse" and "Muse Code" belong to their owners.
 
@@ -23,7 +23,8 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 
 - It **launches the official `muse serve`** as a child process and speaks MSP (JSON-RPC 2.0, one JSON object per line over stdio).
 - It **does not** read your `auth.json`, call the key-minting endpoint, or call the model API on its own. Your subscription stays attached to the official client; login happens through the host (device code flow) when that phase lands.
-- It **defaults to safe mode**: shell and file-write tools are disabled and the session starts in the `:read-only` profile, because approvals are not implemented yet (setting `antares.safeMode`). It will show the active profile and sandbox availability once approvals land. Ready sandbox checks do not mean a given session is contained, so the UI will not imply that.
+- It **starts every chat in the `:read-only` profile** with shell and file-write tools also disabled at the host. You can pick another profile in the header (setting `antares.initialProfile` sets the default); that starts a new chat and asks for confirmation. The profile and the sandbox state the host reports are always shown. Antares never decides an approval by itself.
+- **A ready sandbox check is not an active sandbox.** In testing, `muse sandbox windows check` said `ready` while `muse serve` reported the sandbox unavailable and the shell tool failed closed. Antares shows what the host reports for the session.
 - It **does not bundle or redistribute** Muse or its schemas. Protocol types are generated from the `muse` you have installed (`muse schema generate-json-schema`).
 
 ## Roadmap
@@ -31,7 +32,7 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | MSP client, offline self-test (echo provider), Antares panel with banner | **Done** |
-| 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer. **Next:** paste images, approvals with visible profile and sandbox, model and reasoning-effort picker, subscription-usage alerts, sessions (list, resume, fork) | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
+| 1 (MVP) | **Done:** chat with streaming, copy button on every message and code block, paste text, startup banner, usage/context/token footer, tool-call cards, approval cards (decide with the host's own choices), permission profile per chat with a confirmation for anything above read-only. **Next:** paste images, model and reasoning-effort picker, subscription-usage alerts, sessions (list, resume, fork) | **In progress** (protocol findings: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
 | 2 | Voice input (local Whisper, transcript sent as text), skills (`/`), worktrees | Planned |
 | 3 | MCP servers, plugins, hooks, editor diffs, terminal | Planned |
 | 4 | Video input, polish, Open VSX / Marketplace packaging | Planned |
@@ -85,7 +86,7 @@ This opens the editor with Antares loaded as a development extension in a throwa
 
 ```text
 src/muse/host.ts      JSON-RPC client over the stdio of `muse serve`
-src/muse/session.ts   one chat session over one host (turns, interrupt, safe mode)
+src/muse/session.ts   one chat session over one host (turns, interrupt, approval relay, profile)
 src/muse/events.ts    maps raw MSP notifications to the events the UI shows
 src/muse/selftest.ts  offline end-to-end check (handshake + one echo session)
 src/muse/locate.ts    finds the muse executable
@@ -93,7 +94,7 @@ src/muse/uuidv7.ts    MSP requires UUIDv7 command ids (v4 is refused)
 src/ui/               chat panel, shared page markup and the startup banner
 media/chat.js|css     the chat webview (plain JS, no build step)
 scripts/spike.ts      runs the self-test from the command line
-test/                 integration suite that runs inside a real editor
+test/                 unit tests (npm test) and the integration suite that runs inside a real editor
 scripts/probe-*.ts    protocol probes (one minimal turn; credential state). Run deliberately
 docs/PLAN.md          roadmap, decisions, risks
 docs/PROTOCOL-NOTES.md what has been observed on the wire vs. only read from the schema
