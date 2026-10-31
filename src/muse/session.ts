@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { MuseHost, MspError } from "./host.ts";
 import { mapApprovalRequest, mapModels, mapNotification, mapUsage, type ChatEvent, type ModelInfo } from "./events.ts";
 import { buildInputParts, validateImages, type ImageInput } from "./images.ts";
+import { mapSessionRows, readHistory, type SessionRowView } from "./sessions.ts";
 import { uuidv7 } from "./uuidv7.ts";
 
 export const READ_ONLY = ":read-only";
@@ -25,6 +26,10 @@ export interface MuseSessionOptions {
   clientVersion?: string;
   /** Test seam: arguments placed before `serve` (lets a script stand in for the muse binary). */
   binaryArgs?: string[];
+  /** Continue this stored session instead of starting a new one. */
+  resumeSessionId?: string;
+  /** Start from a fork of this stored session. */
+  forkSessionId?: string;
 }
 
 interface InitializeResult {
@@ -140,22 +145,36 @@ export class MuseSession extends EventEmitter {
 
   private async doStart(): Promise<void> {
     const host = await this.ensureHost();
-    const { workspaceRoot, provider } = this.options;
+    const { workspaceRoot, provider, resumeSessionId, forkSessionId } = this.options;
     const profile = this.profile;
-    const base = { workspaceRoot, ...(provider ? {} : { permissionProfile: profile }) };
-    let started: { session?: { sessionId?: string } };
-    try {
-      started = await host.request("session/start", { commandId: uuidv7(), ...base, ...(this.modelId ? { modelId: this.modelId } : {}) });
-    } catch (error) {
-      if (!(error instanceof MspError) || !this.modelId) throw error;
-      // A remembered model can disappear from the subscription; fall back instead of failing the chat.
-      this.notice("warning", `Model ${this.modelId} is not available; using the default model instead.`);
-      this.modelId = undefined;
-      started = await host.request("session/start", { commandId: uuidv7(), ...base });
+    let started: { session?: { sessionId?: string }; history?: unknown; lastTurn?: unknown };
+    let source: "resume" | "fork" | undefined;
+    if (resumeSessionId) {
+      // Always name the profile: omitting it would restore whatever authority the session had before,
+      // which could be broader than what the user picked in this chat.
+      source = "resume";
+      started = await host.request("session/resume", { commandId: uuidv7(), sessionId: resumeSessionId, history: "inline", ...(provider ? {} : { permissionProfile: profile }) }, 30_000);
+    } else if (forkSessionId) {
+      // A fork cannot be given a permission profile (the contract does not admit one); Antares therefore
+      // only offers it for :read-only chats, where the host-level tool limits apply regardless.
+      source = "fork";
+      started = await host.request("session/fork", { commandId: uuidv7(), sessionId: forkSessionId }, 30_000);
+    } else {
+      const base = { workspaceRoot, ...(provider ? {} : { permissionProfile: profile }) };
+      try {
+        started = await host.request("session/start", { commandId: uuidv7(), ...base, ...(this.modelId ? { modelId: this.modelId } : {}) });
+      } catch (error) {
+        if (!(error instanceof MspError) || !this.modelId) throw error;
+        // A remembered model can disappear from the subscription; fall back instead of failing the chat.
+        this.notice("warning", `Model ${this.modelId} is not available; using the default model instead.`);
+        this.modelId = undefined;
+        started = await host.request("session/start", { commandId: uuidv7(), ...base });
+      }
     }
     this.sessionId = started.session?.sessionId;
     if (!this.sessionId) throw new Error("Muse did not return a session id.");
-    this.emitEvent({ type: "session", profileId: provider ? undefined : profile, sandbox: this.info.sandbox, version: this.info.version, durability: this.info.durability });
+    this.emitEvent({ type: "session", sessionId: this.sessionId, profileId: provider ? undefined : profile, sandbox: this.info.sandbox, version: this.info.version, durability: this.info.durability });
+    if (source) this.emitHistory(source, started);
 
     // Best-effort, read-only extras for the header; failures never block chatting.
     void this.refreshModels();
@@ -163,6 +182,33 @@ export class MuseSession extends EventEmitter {
       const usage = mapUsage(r.usage);
       if (usage) this.emitEvent(usage);
     }).catch(() => undefined);
+  }
+
+  /** Replays a resumed or forked session's stored conversation, saying so when it was not served inline. */
+  private emitHistory(source: "resume" | "fork", result: { history?: unknown; lastTurn?: unknown }): void {
+    const served = readHistory(result.history);
+    let note: string | undefined;
+    if (served.mode !== "inline") note = "Muse did not send this session's earlier messages inline (it is long). You can continue it, but they are not shown here.";
+    else if (source === "fork") note = "This is a fork. The history shown is what Muse returned for the fork; the source conversation is unchanged.";
+    this.emitEvent({ type: "history", source, mode: served.mode, events: served.events, note });
+    const last = result.lastTurn as { terminal?: unknown; reason?: unknown } | undefined;
+    if (last && typeof last.terminal === "string" && last.terminal !== "completed") {
+      this.notice("info", `The last turn of this session ended as "${last.terminal}"${typeof last.reason === "string" ? `: ${last.reason}` : ""}.`);
+    }
+  }
+
+  /** Lists stored sessions (root sessions only, newest first) with the host's own index; reads no conversation. */
+  async listSessions(): Promise<SessionRowView[]> {
+    const host = await this.ensureHost();
+    const rows: SessionRowView[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < 3; page++) {
+      const result: { nextCursor?: string | null } = await host.request("session/list", { limit: 200, ...(cursor ? { cursor } : {}) }, 30_000);
+      rows.push(...mapSessionRows(result, this.options.workspaceRoot));
+      cursor = result.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    return rows.sort((a, b) => b.updatedAtMs - a.updatedAtMs);
   }
 
   /** Reads the catalog (with the session's active model flagged when a session exists). */

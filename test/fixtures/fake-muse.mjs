@@ -69,6 +69,35 @@ rl.on("line", (line) => {
       rec("list", msg.params);
       send({ id: msg.id, result: { providerId: "meta", profileId: "tbh", source: "providerCatalog", models: CATALOG.map((m) => ({ ...m, isActive: Boolean(msg.params.sessionId) && m.modelId === activeModel })) } });
       break;
+    case "session/list": {
+      rec("list-sessions", msg.params);
+      const here = process.env.FAKE_MUSE_WORKSPACE ?? "";
+      const row = (id, extra) => ({ sessionId: id, path: "", status: "idle", activeTurnId: null, createdAt: "2026-10-31T10:00:00Z", updatedAt: "2026-10-31T10:00:00Z", lastActivityAt: "2026-10-31T10:00:00Z", workspaceRoot: here, providerId: "meta", modelId: "muse-wonder-1.0", turnCount: 2, forkedFrom: null, sideFrom: null, kind: "root", title: `Session ${id}`, ...extra });
+      if (!msg.params.cursor) {
+        send({ id: msg.id, result: { nextCursor: "page-2", sessions: [row("old", { lastActivityAt: "2026-10-01T10:00:00Z", updatedAt: "2026-10-31T09:00:00Z" }), row("child", { kind: "subagent" }), row("elsewhere", { workspaceRoot: "Z:\\\\other\\\\repo", lastActivityAt: "2026-10-20T10:00:00Z" })] } });
+      } else {
+        send({ id: msg.id, result: { nextCursor: null, sessions: [row("new", { lastActivityAt: "2026-10-31T12:00:00Z", title: "", name: "Named session", forkedFrom: { sessionId: "old" } })] } });
+      }
+      break;
+    }
+    case "session/resume":
+    case "session/fork": {
+      const isFork = msg.method === "session/fork";
+      rec(isFork ? "fork" : "resume", msg.params);
+      const sessionId = isFork ? "s-fork" : msg.params.sessionId;
+      const inline = process.env.FAKE_MUSE_HISTORY !== "snapshot";
+      const items = isFork
+        ? [{ itemId: "a1", kind: "agentMessage", status: "completed", text: "Forked answer" }]
+        : [
+            { itemId: "hk", kind: "hookRun", status: "completed", label: "a hook" },
+            { itemId: "u1", kind: "userMessage", status: "completed", text: "Look at this[Image #1]", attachments: [{ type: "image", mediaType: "image/png", width: 8, height: 8, attachmentId: "x/1" }] },
+            { itemId: "t1", kind: "toolCall", status: "completed", tool: "read_file", args: '{"path":"a.txt"}', visibleOutput: "contents" },
+            { itemId: "a1", kind: "agentMessage", status: "completed", text: "I looked." },
+            { itemId: "rc", kind: "reminderChild", status: "completed" },
+          ];
+      send({ id: msg.id, result: { session: { sessionId, modelId: "muse-wonder-1.0", status: "idle" }, viewCursor: "v4:x:1", pendingRequests: [], history: inline ? { mode: "inline", items, snapshot: null } : { mode: "snapshot", items: null, snapshot: {} }, ...(process.env.FAKE_MUSE_LASTTURN ? { lastTurn: { terminal: "failed", turnId: "t9", reason: "crash" } } : {}) } });
+      break;
+    }
     case "usage/refresh":
       rec("refresh", {});
       send({ id: msg.id, result: { subscriptionActive: true, tierName: "Test Plan", usage: { observedAtMs: Date.now(), tier: "opaque-tier-id", window: { usedPercent: 42, windowDurationMins: 300, resetsAtMs: Date.now() + 3600000 }, weekly: { usedPercent: 7, resetsAtMs: Date.now() + 86400000 } } } });

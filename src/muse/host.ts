@@ -76,8 +76,19 @@ export class MuseHost extends EventEmitter {
         if (line !== "") this.emit("stderr", line);
       }
     });
-    child.on("error", (error) => this.failAll(error));
+    // A write to a host that is already gone must not crash the extension host with an unhandled EPIPE.
+    child.stdin.on("error", () => undefined);
+    child.on("error", (error) => {
+      // A failed spawn (missing binary, bad working directory) never produces an "exit" event, so treat
+      // the host as gone here: otherwise stop() would wait for an exit that cannot come.
+      if (!this.exited) {
+        this.exited = true;
+        this.failAll(error);
+        this.emit("exit", null, null);
+      }
+    });
     child.on("exit", (code, signal) => {
+      if (this.exited) return;
       this.exited = true;
       this.failAll(new Error(`muse host exited (code ${code}, signal ${signal})`));
       this.emit("exit", code, signal);
@@ -110,7 +121,8 @@ export class MuseHost extends EventEmitter {
   /** Closes stdin (the host exits cleanly) and escalates to terminate/kill if it lingers. */
   async stop(graceMs = 5000): Promise<number | null> {
     const child = this.child;
-    if (!child || this.exited) return child?.exitCode ?? null;
+    // A child that never started has no pid; its exitCode would be a libuv error number, not an exit code.
+    if (!child || this.exited) return child && child.pid !== undefined ? child.exitCode : null;
     const done = new Promise<number | null>((resolve) => child.once("exit", (code) => resolve(code)));
     child.stdin.end();
     const timeout = (ms: number) => new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), ms));

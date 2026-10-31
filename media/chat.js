@@ -12,6 +12,11 @@
   const modelSel = $("model");
   const effortSel = $("effort");
   const attachmentsEl = $("attachments");
+  const historyPanel = $("historyPanel");
+  const historyList = $("historyList");
+  const historyStatus = $("historyStatus");
+  const historySearch = $("historySearch");
+  const historyAll = $("historyAll");
   const attachBtn = $("attach");
   const fileInput = $("file");
 
@@ -26,6 +31,9 @@
     items: new Map(), // itemId -> { el, text, role, raf }
     tools: new Map(), // itemId -> element
     approvals: new Map(), // approvalId -> { el, event, decided }
+    sessions: [], // stored sessions shown in the history panel
+    currentSessionId: undefined,
+    canFork: false,
     attachments: [], // pending images: { mediaType, base64Data, width, height, dataUrl, bytes }
     lastSent: [], // the images of the message just sent, restored if the send is refused
     sentQueue: [], // thumbnails of sent messages, matched to the host's userMessage by image count
@@ -463,6 +471,7 @@
         break;
       }
       case "session":
+        state.currentSessionId = e.sessionId;
         state.sandbox = e.sandbox;
         if (e.profileId) state.profileId = e.profileId;
         renderMeta();
@@ -493,6 +502,12 @@
         else state.background.delete(e.itemId);
         renderMeta();
         break;
+      case "history":
+        // A stored conversation is redrawn without touching the running/ready state.
+        for (const past of e.events) onEvent(past);
+        if (e.note) addNotice("info", e.note);
+        else if (e.events.length === 0) addNotice("info", "This session has no earlier messages to show.");
+        break;
       case "notice":
         addNotice(e.level, e.text);
         // A refused send must not eat the user's images: put them back.
@@ -512,7 +527,9 @@
     if (!msg) return;
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "config") applyConfig(msg);
+    else if (msg.type === "sessions") showSessions(msg);
     else if (msg.type === "reset") {
+      closeHistory();
       for (const node of messages.querySelectorAll(".msg, .notice, .tool, .approval")) node.remove();
       state.items.clear();
       state.attachments = [];
@@ -554,6 +571,96 @@
     document.querySelectorAll("[data-copy-pending]").forEach((b) => b.removeAttribute("data-copy-pending"));
     btn.setAttribute("data-copy-pending", "1");
     vscode.postMessage({ type: "copy", text });
+  });
+
+  // ---- session history: continue or fork a stored session of this folder ----
+  function agoText(ms) {
+    if (!ms) return "";
+    const diff = Date.now() - ms;
+    if (diff < 60000) return "just now";
+    const mins = Math.round(diff / 60000);
+    if (mins < 60) return mins + " min ago";
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return hours + " h ago";
+    const days = Math.round(hours / 24);
+    return days === 1 ? "yesterday" : days < 14 ? days + " d ago" : new Date(ms).toLocaleDateString();
+  }
+  function openHistory() {
+    historyPanel.hidden = false;
+    historyStatus.textContent = "Loading…";
+    historyList.replaceChildren();
+    vscode.postMessage({ type: "listSessions" });
+    historySearch.focus();
+  }
+  function closeHistory() {
+    historyPanel.hidden = true;
+  }
+  function showSessions(msg) {
+    state.sessions = msg.sessions || [];
+    state.currentSessionId = msg.currentSessionId || state.currentSessionId;
+    state.canFork = !!msg.canFork;
+    if (msg.error) {
+      historyStatus.textContent = "Could not list sessions: " + msg.error;
+      historyList.replaceChildren();
+      return;
+    }
+    renderSessions();
+  }
+  function renderSessions() {
+    const q = historySearch.value.trim().toLowerCase();
+    const showOthers = historyAll.checked;
+    const rows = state.sessions.filter((s) => (showOthers || s.sameWorkspace) && (!q || s.title.toLowerCase().includes(q)));
+    historyList.replaceChildren();
+    const hidden = state.sessions.filter((s) => !s.sameWorkspace).length;
+    const hiddenNote = !showOthers && hidden ? " " + (hidden === 1 ? "1 session in another folder is hidden." : hidden + " sessions in other folders are hidden.") : "";
+    historyStatus.textContent = rows.length
+      ? rows.length + " session" + (rows.length === 1 ? "" : "s") + "." + hiddenNote
+      : state.sessions.length ? "No session matches." + hiddenNote : "No stored sessions yet.";
+    for (const s of rows) {
+      const li = el("li", "session" + (s.sessionId === state.currentSessionId ? " current" : ""));
+      const info = el("div", "session-info");
+      info.append(el("div", "session-title", s.title));
+      const bits = [agoText(s.updatedAtMs), s.turnCount + (s.turnCount === 1 ? " turn" : " turns")];
+      if (s.modelId) bits.push(s.modelId);
+      if (s.forked) bits.push("fork");
+      if (s.sessionId === state.currentSessionId) bits.push("this chat");
+      if (!s.sameWorkspace && s.workspaceRoot) bits.push(s.workspaceRoot);
+      info.append(el("div", "session-meta", bits.filter(Boolean).join(" · ")));
+      const actions = el("div", "session-actions");
+      const open = el("button", "link", "Continue");
+      const fork = el("button", "link", "Fork");
+      if (!s.sameWorkspace) {
+        open.disabled = true;
+        fork.disabled = true;
+        open.title = "This session belongs to another folder. Open that folder to continue it.";
+        fork.title = open.title;
+      } else if (s.sessionId === state.currentSessionId) {
+        open.disabled = true;
+        open.title = "This is the current chat.";
+      }
+      if (!state.canFork && s.sameWorkspace) {
+        fork.disabled = true;
+        fork.title = "A fork cannot be given a permission profile, so forking is only offered in Read-only chats.";
+      }
+      open.addEventListener("click", () => {
+        closeHistory();
+        vscode.postMessage({ type: "openSession", sessionId: s.sessionId, mode: "resume" });
+      });
+      fork.addEventListener("click", () => {
+        closeHistory();
+        vscode.postMessage({ type: "openSession", sessionId: s.sessionId, mode: "fork" });
+      });
+      actions.append(open, fork);
+      li.append(info, actions);
+      historyList.append(li);
+    }
+  }
+  $("historyBtn").addEventListener("click", openHistory);
+  $("historyClose").addEventListener("click", closeHistory);
+  historySearch.addEventListener("input", renderSessions);
+  historyAll.addEventListener("change", renderSessions);
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !historyPanel.hidden) closeHistory();
   });
 
   // ---- composer ----

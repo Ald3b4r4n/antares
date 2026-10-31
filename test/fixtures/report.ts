@@ -15,11 +15,14 @@ export interface FakeReport {
   listParams: Record<string, unknown>[];
   initializes: Record<string, unknown>[];
   refreshes: number;
+  sessionLists: Record<string, unknown>[];
+  resumes: Record<string, unknown>[];
+  forks: Record<string, unknown>[];
 }
 
 /** Reads the report. A missing file or a half-written last line is "not yet": callers poll. */
 export function readReport(path: string): FakeReport {
-  const report: FakeReport = { argv: [], startAttempts: [], startParams: {}, receipts: [], decides: [], interrupts: 0, setModels: [], turnStarts: [], listParams: [], initializes: [], refreshes: 0 };
+  const report: FakeReport = { argv: [], startAttempts: [], startParams: {}, receipts: [], decides: [], interrupts: 0, setModels: [], turnStarts: [], listParams: [], initializes: [], refreshes: 0, sessionLists: [], resumes: [], forks: [] };
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -68,6 +71,15 @@ export function readReport(path: string): FakeReport {
         break;
       case "refresh":
         report.refreshes++;
+        break;
+      case "list-sessions":
+        report.sessionLists.push(data as Record<string, unknown>);
+        break;
+      case "resume":
+        report.resumes.push(data as Record<string, unknown>);
+        break;
+      case "fork":
+        report.forks.push(data as Record<string, unknown>);
         break;
     }
   }

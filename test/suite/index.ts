@@ -88,6 +88,22 @@ export async function run(): Promise<void> {
   assert.equal(panel.testState.events.filter((e) => e.type === "userMessage").length, userMessagesBefore + 1, "a refused image must not be sent");
   assert.equal(panel.testState.events.filter((e) => e.type === "notice").length, noticesBefore + 1, "the refusal is shown to the user");
 
+  // History: the panel answers a list request (with the rows or a readable error, never silence), and a
+  // session that cannot be opened is reported as an error instead of leaving a broken chat behind.
+  const listsBefore = panel.testState.sessionLists;
+  await panel.onMessage({ type: "listSessions" });
+  await waitFor("the session list reply", () => panel.testState.sessionLists > listsBefore, 20_000);
+  const errorsBefore = panel.testState.events.filter((e) => e.type === "notice" && e.level === "error").length;
+  await panel.onMessage({ type: "openSession", sessionId: "00000000-0000-7000-8000-000000000000", mode: "resume" });
+  await waitFor("the refusal to open a missing session", () => panel.testState.events.filter((e) => e.type === "notice" && e.level === "error").length > errorsBefore, 20_000);
+  const reopened = panel.testState.events.filter((e) => e.type === "notice" && e.level === "error").pop();
+  assert.match(reopened?.type === "notice" ? reopened.text : "", /Could not continue that session/);
+  await panel.onMessage({ type: "openSession", sessionId: "x", mode: "fork" }); // forking a session that does not exist is refused as well
+  await panel.onMessage({ type: "openSession", sessionId: 42 as unknown as string, mode: "resume" }); // malformed input is ignored
+  panel.testState.rendered = undefined;
+  await panel.send("still works after a failed open");
+  await waitFor("a turn after the failed open", () => (panel.testState as { rendered?: unknown }).rendered !== undefined, 30_000);
+
   // New chat restarts cleanly, and a second turn works on the new session.
   await panel.onMessage({ type: "newChat" });
   panel.testState.rendered = undefined;

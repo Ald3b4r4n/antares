@@ -109,7 +109,8 @@ export type ChatEvent =
   | { type: "effortChanged"; effort: string; source: string }
   | { type: "activity"; itemId: string; kind: string; label?: string; status: string }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
-  | { type: "session"; profileId?: string; sandbox?: string; version?: string; durability?: string }
+  | { type: "session"; sessionId?: string; profileId?: string; sandbox?: string; version?: string; durability?: string }
+  | { type: "history"; source: "resume" | "fork"; mode: string; events: ChatEvent[]; note?: string }
   | {
       type: "toolCall";
       itemId: string;

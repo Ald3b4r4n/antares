@@ -25,6 +25,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
   <span class="header-right">
     <label class="profile-label" for="profile">Profile</label>
     <select id="profile" title="Permission profile for this chat. Changing it starts a new chat."></select>
+    <button id="historyBtn" class="link" title="Continue or fork a stored session of this folder">History</button>
     <button id="newChat" class="link">New chat</button>
   </span>
 </header>
@@ -33,6 +34,16 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <div><pre class="logo">${escapeHtml(ANTARES_ASCII)}</pre><p class="tag">${escapeHtml(ANTARES_TAGLINE)}</p></div></div>
   <p class="hint" id="hint">Enter sends · Shift+Enter adds a line · paste, drop or attach images.</p>
 </div>
+<section id="historyPanel" class="overlay" hidden aria-label="Session history">
+  <div class="overlay-head">
+    <strong>Sessions</strong>
+    <input id="historySearch" type="search" placeholder="Filter by title…" aria-label="Filter sessions">
+    <label class="inline"><input id="historyAll" type="checkbox"> other folders</label>
+    <button id="historyClose" class="link" aria-label="Close history">Close</button>
+  </div>
+  <div id="historyStatus" class="overlay-status"></div>
+  <ul id="historyList" class="session-list"></ul>
+</section>
 <footer>
   <div id="meta"></div>
   <div class="controls">

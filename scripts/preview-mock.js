@@ -123,6 +123,29 @@ window.acquireVsCodeApi = () => ({
       post(config());
       emit({ type: "session", profileId, sandbox: "unavailable", version: "1.4.14" });
       emit({ type: "models", models: catalog() });
+    } else if (m.type === "listSessions") {
+      const now = Date.now();
+      setTimeout(() => post({
+        type: "sessions", currentSessionId: "s-current", canFork: profileId === ":read-only",
+        sessions: [
+          { sessionId: "s-1", title: "Refactor the parser and add tests for the tokenizer", updatedAtMs: now - 12 * 60000, turnCount: 6, modelId: "muse-wonder-1.0", workspaceRoot: "D:\\work\\project", sameWorkspace: true, forked: false },
+          { sessionId: "s-2", title: "Why does the build fail on Windows?", updatedAtMs: now - 5 * 3600000, turnCount: 2, modelId: "muse-spark-1.3", workspaceRoot: "D:\\work\\project", sameWorkspace: true, forked: true },
+          { sessionId: "s-current", title: "(this chat)", updatedAtMs: now, turnCount: 0, workspaceRoot: "D:\\work\\project", sameWorkspace: true, forked: false },
+          { sessionId: "s-other", title: "Notes for a different repository", updatedAtMs: now - 3 * 86400000, turnCount: 9, modelId: "muse-wonder-1.0", workspaceRoot: "D:\\other\\repo", sameWorkspace: false, forked: false },
+        ],
+      }), 150);
+    } else if (m.type === "openSession") {
+      post({ type: "reset" });
+      post(config());
+      const past = [
+        { type: "userMessage", itemId: "h1", text: "Why does the build fail on Windows?[Image #1]", attachments: [{ type: "image", mediaType: "image/png", width: 800, height: 600 }] },
+        { type: "toolCall", itemId: "h2", tool: "read_file", summary: "build.log", status: "completed", held: false, output: "error: path too long" },
+        { type: "assistantCompleted", itemId: "h3", text: "The log shows a **path too long** error. Enable long paths or shorten the output directory." },
+      ];
+      setTimeout(() => {
+        emit({ type: "session", sessionId: m.sessionId, profileId, sandbox: "unavailable" });
+        emit({ type: "history", source: m.mode, mode: "inline", events: past, note: m.mode === "fork" ? "This is a fork. The history shown is what Muse returned for the fork; the source conversation is unchanged." : undefined });
+      }, 200);
     } else if (m.type === "setModel") {
       modelId = m.modelId;
       effort = undefined;

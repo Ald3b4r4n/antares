@@ -14,6 +14,8 @@ type FromWebview =
   | { type: "newChat" }
   | { type: "setProfile"; profileId: string }
   | { type: "refreshUsage" }
+  | { type: "listSessions" }
+  | { type: "openSession"; sessionId: string; mode: "resume" | "fork" }
   | { type: "setModel"; modelId: string }
   | { type: "setEffort"; effort?: string }
   | { type: "decide"; approvalId: string; choiceId: string; requirementId: unknown; feedback?: string }
@@ -25,6 +27,7 @@ export interface TestState {
   ready: number;
   events: ChatEvent[];
   rendered?: { messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
+  sessionLists: number;
 }
 
 const KNOWN_PROFILES = new Set(PROFILES.map((p) => p.id));
@@ -37,10 +40,11 @@ export class ChatPanel {
   private readonly tracker: UsageTracker;
   private session?: MuseSession;
   private profile: string;
+  private currentSessionId?: string;
   /** The user's last model/effort choice (undefined = the host's defaults). Remembered across chats. */
   private modelId?: string;
   private effort?: string;
-  readonly testState: TestState = { ready: 0, events: [] };
+  readonly testState: TestState = { ready: 0, events: [], sessionLists: 0 };
 
   static get(): ChatPanel | undefined {
     return ChatPanel.current;
@@ -87,7 +91,10 @@ export class ChatPanel {
   }
 
   private post(message: object): void {
-    if (process.env.ANTARES_TEST === "1" && "event" in message) this.testState.events.push((message as { event: ChatEvent }).event);
+    if (process.env.ANTARES_TEST === "1") {
+      if ("event" in message) this.testState.events.push((message as { event: ChatEvent }).event);
+      if ((message as { type?: string }).type === "sessions") this.testState.sessionLists++;
+    }
     void this.panel.webview.postMessage(message);
   }
 
@@ -167,6 +174,12 @@ export class ChatPanel {
       case "refreshUsage":
         await this.refreshUsage(false);
         break;
+      case "listSessions":
+        await this.listSessions();
+        break;
+      case "openSession":
+        if (typeof message.sessionId === "string" && (message.mode === "resume" || message.mode === "fork")) await this.openStored(message.sessionId, message.mode);
+        break;
       case "setModel":
         await this.setModel(message.modelId);
         break;
@@ -195,6 +208,44 @@ export class ChatPanel {
     this.post({ type: "reset" });
     this.postConfig();
     void this.warm();
+  }
+
+  /** Lists this folder's stored sessions (titles come from the user's own history and go only to their panel). */
+  private async listSessions(): Promise<void> {
+    const session = this.ensureSession(true) ?? this.ensureSession(false);
+    if (!session) return;
+    try {
+      const sessions = await session.listSessions();
+      this.post({ type: "sessions", sessions, currentSessionId: this.currentSessionId, canFork: this.profile === READ_ONLY });
+    } catch (error) {
+      this.post({ type: "sessions", sessions: [], error: error instanceof Error ? error.message : String(error), canFork: this.profile === READ_ONLY });
+    }
+  }
+
+  /** Continues a stored session, or (read-only chats only) a fork of it. Replaces the current chat. */
+  private async openStored(sessionId: string, mode: "resume" | "fork"): Promise<void> {
+    if (this.session?.busy) {
+      this.notice("warning", "Stop the current turn before opening another session.");
+      return;
+    }
+    if (mode === "fork" && this.profile !== READ_ONLY) {
+      this.notice("warning", "A fork cannot be given a permission profile, so forking is only offered in Read-only chats. Switch this chat to Read-only first.");
+      return;
+    }
+    await this.session?.stop();
+    this.session = undefined;
+    this.currentSessionId = undefined;
+    this.post({ type: "reset" });
+    this.postConfig();
+    const session = this.ensureSession(false, mode === "resume" ? { resumeSessionId: sessionId } : { forkSessionId: sessionId });
+    if (!session) return;
+    try {
+      await session.start();
+    } catch (error) {
+      this.notice("error", `Could not ${mode === "resume" ? "continue" : "fork"} that session: ${error instanceof Error ? error.message : String(error)}`);
+      await session.stop();
+      if (this.session === session) this.session = undefined;
+    }
   }
 
   /** Starts the host quietly so the model picker has a catalog before the first message. No model call. */
@@ -243,7 +294,7 @@ export class ChatPanel {
     }
   }
 
-  private ensureSession(quiet = false): MuseSession | undefined {
+  private ensureSession(quiet = false, open?: { resumeSessionId?: string; forkSessionId?: string }): MuseSession | undefined {
     if (this.session) return this.session;
     const config = vscode.workspace.getConfiguration("antares");
     const binary = locateMuse(config.get<string>("musePath"));
@@ -265,6 +316,7 @@ export class ChatPanel {
       effort: this.effort,
       provider: config.get<string>("dev.provider") || undefined,
       clientVersion: version,
+      ...open,
     });
     session.on("event", (event: ChatEvent) => {
       if (event.type === "models" && this.modelId && event.models.length > 0 && !event.models.some((m) => m.modelId === this.modelId)) {
@@ -281,6 +333,7 @@ export class ChatPanel {
       }
       // Usage and token events also feed the shared tracker (status bar, alerts, ledger); the page gets
       // the merged usage, which carries the plan name and the observation time.
+      if (event.type === "session") this.currentSessionId = event.sessionId;
       const extras = this.tracker.handle(event);
       this.post({ type: "event", event: event.type === "usage" ? (this.tracker.latest() ?? event) : event });
       for (const extra of extras) this.post({ type: "event", event: extra });

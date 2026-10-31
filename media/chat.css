@@ -150,3 +150,20 @@ body.dragging::after { content: "Drop images to attach"; position: fixed; inset:
 #meta .err { color: var(--error); font-weight: 600; }
 #meta .stale { color: var(--muted); font-style: italic; }
 .link.tiny { padding: 1px 8px; font-size: 11px; margin-left: auto; }
+
+/* ---- session history ---- */
+.overlay { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
+.overlay[hidden] { display: none; }
+.overlay-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.overlay-head input[type="search"] { flex: 1; min-width: 80px; background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font: inherit; }
+.overlay-head input[type="search"]:focus { outline: none; border-color: var(--focus); }
+.inline { color: var(--muted); font-size: 12px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.overlay-status { padding: 8px 14px; color: var(--muted); font-size: 12px; }
+.session-list { list-style: none; margin: 0; padding: 0 14px 14px; overflow-y: auto; flex: 1; }
+.session { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.session.current { border-color: var(--antares); }
+.session-info { min-width: 0; flex: 1; }
+.session-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-meta { color: var(--muted); font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; }
+.session-actions { display: flex; gap: 6px; flex: none; }
+.session-actions .link:disabled { opacity: .45; cursor: default; }
