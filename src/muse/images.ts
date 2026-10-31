@@ -81,10 +81,14 @@ export function validateImages(input: unknown): ImageCheck {
   return { ok: true, images };
 }
 
-/** The ordered input parts for a turn: the text first, then the images. */
-export function buildInputParts(text: string, images: ImageInput[]): Record<string, unknown>[] {
+/**
+ * The ordered input parts for a turn: the text first, then the images. A skill invocation (`/name args`
+ * resolved against the host's skill list) replaces the text: the host expands the skill itself.
+ */
+export function buildInputParts(text: string, images: ImageInput[], skill?: { selector: string; source?: string; arguments?: string }): Record<string, unknown>[] {
   const parts: Record<string, unknown>[] = [];
-  if (text.trim() !== "") parts.push({ type: "text", text });
+  if (skill) parts.push({ type: "skill", selector: skill.selector, ...(skill.source ? { source: skill.source } : {}), ...(skill.arguments ? { arguments: skill.arguments } : {}) });
+  else if (text.trim() !== "") parts.push({ type: "text", text });
   for (const image of images) parts.push({ type: "image", ...image });
   return parts;
 }

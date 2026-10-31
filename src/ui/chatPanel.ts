@@ -1,7 +1,11 @@
 import { randomBytes } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
-import { validateImages, type ImageInput } from "../muse/images.ts";
+import { imageTypeFor, mentionFor, rootsFor } from "../muse/composer.ts";
+import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
+import { listMcpServers } from "../muse/mcp.ts";
 import { locateMuse } from "../muse/locate.ts";
 import { MuseSession, READ_ONLY } from "../muse/session.ts";
 import { chatHtml } from "./chatHtml.ts";
@@ -10,7 +14,14 @@ import { VoiceBridge } from "./voiceBridge.ts";
 
 type FromWebview =
   | { type: "ready" }
-  | { type: "send"; text: string; images?: ImageInput[] }
+  | { type: "send"; text: string; images?: ImageInput[]; mode?: "steer" | "queue" }
+  | { type: "pickFiles" }
+  | { type: "addFolder" }
+  | { type: "removeFolder"; path: string }
+  | { type: "listSkills" }
+  | { type: "listConnectors" }
+  | { type: "listPlugins" }
+  | { type: "unqueue"; turnId: string }
   | { type: "stop" }
   | { type: "newChat" }
   | { type: "setProfile"; profileId: string }
@@ -48,6 +59,8 @@ export class ChatPanel {
   /** The user's last model/effort choice (undefined = the host's defaults). Remembered across chats. */
   private modelId?: string;
   private effort?: string;
+  /** Folders the user added to this chat besides the workspace; they end with the chat. */
+  private extraRoots: string[] = [];
   readonly testState: TestState = { ready: 0, events: [], sessionLists: 0, voice: [] };
 
   static get(): ChatPanel | undefined {
@@ -168,7 +181,28 @@ export class ChatPanel {
         this.post({ type: "copied" });
         break;
       case "send":
-        await this.send(message.text, message.images);
+        await this.send(message.text, message.images, message.mode === "steer" || message.mode === "queue" ? message.mode : undefined);
+        break;
+      case "pickFiles":
+        await this.pickFiles();
+        break;
+      case "addFolder":
+        await this.addFolder();
+        break;
+      case "removeFolder":
+        this.removeFolder(message.path);
+        break;
+      case "listSkills":
+        await this.listSkills();
+        break;
+      case "listConnectors":
+        await this.listConnectors();
+        break;
+      case "listPlugins":
+        await this.listPlugins();
+        break;
+      case "unqueue":
+        await this.unqueue(message.turnId);
         break;
       case "stop":
         await this.session?.interrupt();
@@ -216,7 +250,9 @@ export class ChatPanel {
     await this.session?.stop();
     this.session = undefined;
     this.profile = profile;
+    this.extraRoots = []; // folders added to a chat end with it
     this.post({ type: "reset" });
+    this.postFolders();
     this.postConfig();
     void this.warm();
   }
@@ -246,7 +282,9 @@ export class ChatPanel {
     await this.session?.stop();
     this.session = undefined;
     this.currentSessionId = undefined;
+    this.extraRoots = [];
     this.post({ type: "reset" });
+    this.postFolders();
     this.postConfig();
     const session = this.ensureSession(false, mode === "resume" ? { resumeSessionId: sessionId } : { forkSessionId: sessionId });
     if (!session) return;
@@ -355,11 +393,12 @@ export class ChatPanel {
         this.notice("warning", `The Muse host stopped (exit code ${code}). It will restart on your next message.`);
       }
     });
+    if (this.extraRoots.length > 0) session.setExtraRoots(this.extraRoots);
     this.session = session;
     return session;
   }
 
-  async send(text: string, images?: ImageInput[]): Promise<void> {
+  async send(text: string, images?: ImageInput[], mode?: "steer" | "queue"): Promise<void> {
     // The webview is untrusted input: check before a host is even started for this message.
     const checked = validateImages(images);
     if (!checked.ok) {
@@ -370,9 +409,154 @@ export class ChatPanel {
     const session = this.ensureSession();
     if (!session) return;
     try {
-      await session.send(text, checked.images);
+      await session.send(text, checked.images, mode ? { ifBusy: mode } : {});
     } catch (error) {
       this.notice("error", `Could not send the message: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // ---- the composer's "+" menu ----
+
+  private workspaceFolder(): string | undefined {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  }
+
+  /** Test seam: `antares.dev.picks` stands in for the native dialogs so a real-window check can drive them. */
+  private devPicks(): string[] {
+    return vscode.workspace.getConfiguration("antares").get<string[]>("dev.picks", []).filter((p) => typeof p === "string" && p !== "");
+  }
+
+  /**
+   * "Add files or photos": images (PNG, JPEG, GIF, WebP within the size limit) become attachments; any other
+   * file becomes an `@path` mention in the message, because Muse has no file input part. A file outside the
+   * workspace folders cannot be mentioned (the host's file tools refuse it): the user is told to add its folder.
+   */
+  private async pickFiles(): Promise<void> {
+    const root = this.workspaceFolder();
+    if (!root) {
+      this.notice("error", "Open a folder first: Muse works inside a workspace.");
+      return;
+    }
+    const dev = this.devPicks();
+    const uris = dev.length > 0
+      ? dev.map((p) => vscode.Uri.file(p))
+      : await vscode.window.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: false, defaultUri: vscode.Uri.file(root), openLabel: "Add", title: "Add files or photos" });
+    if (!uris || uris.length === 0) return;
+    const roots = rootsFor(root, this.extraRoots);
+    const images: { name: string; mediaType: string; base64Data: string }[] = [];
+    const mentions: string[] = [];
+    const skipped: string[] = [];
+    for (const uri of uris) {
+      const name = basename(uri.fsPath);
+      const imageType = imageTypeFor(name);
+      try {
+        if (imageType) {
+          const size = (await stat(uri.fsPath)).size;
+          if (size > MAX_IMAGE_BYTES) {
+            skipped.push(`${name} is too large (${(size / 1048576).toFixed(1)} MB; the limit is ${MAX_IMAGE_BYTES / 1048576} MB).`);
+            continue;
+          }
+          images.push({ name, mediaType: imageType, base64Data: (await readFile(uri.fsPath)).toString("base64") });
+        } else {
+          const mention = mentionFor(uri.fsPath, roots);
+          if (mention) mentions.push(mention);
+          else skipped.push(`${name} is outside this chat's folders, so Muse's file tools would refuse it. Use "Add folder" for its folder first.`);
+        }
+      } catch (error) {
+        skipped.push(`${name} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    this.post({ type: "picked", images, mentions, skipped });
+  }
+
+  /**
+   * "Add folder": lets the agent's file tools reach another folder in this chat. That is a grant of access, so
+   * it asks first and says what it does. Antares does not grant Project Trust for the folder. The host takes
+   * the new set with the next message.
+   */
+  private async addFolder(): Promise<void> {
+    const root = this.workspaceFolder();
+    if (!root) {
+      this.notice("error", "Open a folder first: Muse works inside a workspace.");
+      return;
+    }
+    const dev = this.devPicks();
+    const picked = dev.length > 0 ? vscode.Uri.file(dev[0]!) : (await vscode.window.showOpenDialog({ canSelectMany: false, canSelectFiles: false, canSelectFolders: true, defaultUri: vscode.Uri.file(root), openLabel: "Add folder", title: "Add a folder to this chat" }))?.[0];
+    if (!picked) return;
+    const path = picked.fsPath;
+    if (rootsFor(root, this.extraRoots).includes(path)) {
+      this.notice("info", `${path} is already part of this chat.`);
+      return;
+    }
+    const choice = await vscode.window.showWarningMessage(
+      `Give Muse access to ${path}?`,
+      {
+        modal: true,
+        detail: `In this chat, the agent's file tools will be able to read this folder${this.profile === READ_ONLY ? "" : " and, depending on the profile, change it"}. Antares does not grant Project Trust for it.\n\nIt takes effect with your next message and ends with this chat.`,
+      },
+      "Add folder",
+    );
+    if (choice !== "Add folder") return;
+    this.extraRoots = [...this.extraRoots, path];
+    this.session?.setExtraRoots(this.extraRoots);
+    this.postFolders();
+  }
+
+  private removeFolder(path: string): void {
+    if (!this.extraRoots.includes(path)) return;
+    this.extraRoots = this.extraRoots.filter((p) => p !== path);
+    this.session?.setExtraRoots(this.extraRoots);
+    this.postFolders();
+  }
+
+  private postFolders(): void {
+    this.post({ type: "folders", folders: this.extraRoots });
+  }
+
+  /** Reads the skills for the slash palette. This starts the session (no model call). */
+  private async listSkills(): Promise<void> {
+    const session = this.ensureSession(true) ?? this.ensureSession(false);
+    if (!session) return;
+    try {
+      this.post({ type: "skills", skills: await session.listSkills() });
+    } catch (error) {
+      this.post({ type: "skills", skills: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async listPlugins(): Promise<void> {
+    const session = this.ensureSession(true) ?? this.ensureSession(false);
+    if (!session) return;
+    try {
+      this.post({ type: "extras", kind: "plugins", rows: await session.listPlugins() });
+    } catch (error) {
+      this.post({ type: "extras", kind: "plugins", rows: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async listConnectors(): Promise<void> {
+    const config = vscode.workspace.getConfiguration("antares");
+    const binary = locateMuse(config.get<string>("musePath"));
+    const root = this.workspaceFolder();
+    if (!binary || !root) {
+      this.post({ type: "extras", kind: "connectors", rows: [], error: !binary ? "Muse executable not found." : "Open a folder first." });
+      return;
+    }
+    try {
+      this.post({ type: "extras", kind: "connectors", rows: await listMcpServers({ binary, cwd: root, clientVersion: (this.context.extension.packageJSON as { version?: string }).version }) });
+    } catch (error) {
+      this.post({ type: "extras", kind: "connectors", rows: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** Takes a queued message back. If it already launched, the host refuses and the message stays in the chat. */
+  private async unqueue(turnId: string): Promise<void> {
+    if (typeof turnId !== "string" || !this.session) return;
+    try {
+      await this.session.unqueue(turnId);
+      this.post({ type: "event", event: { type: "unqueued", turnId } satisfies ChatEvent });
+    } catch (error) {
+      this.notice("warning", `That message could not be taken back (it may have started already): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

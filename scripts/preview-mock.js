@@ -30,11 +30,16 @@ let usageNow;
 let refreshCount = 0;
 const config = () => ({ type: "config", profileId, profiles: PROFILES, modelId, effort, usage: usageNow, ledger: { todayTokens: ledgerToday, weekTokens: ledgerToday }, thresholds: [80, 95] });
 let n = 0;
+let turnRunning = false;
+let nextTurnId;
+const queued = new Map(); // turnId -> the message the fake host is holding
+let folders = [];
 const decisions = new Map(); // approvalId -> resolve
 
 // Like the real host: "[Image #n]" markers are appended to the text and only metadata comes back.
 function startTurn(text, images) {
-  const turnId = "t" + ++n;
+  const turnId = nextTurnId ?? "t" + ++n;
+  nextTurnId = undefined;
   const list = images || [];
   const marked = text + list.map((_, i) => "[Image #" + (i + 1) + "]").join("");
   emit({ type: "status", status: "running" });
@@ -166,7 +171,52 @@ window.acquireVsCodeApi = () => ({
     } else if (m.type === "setEffort") {
       effort = m.effort;
       post(config());
-    } else if (m.type === "send") turn(m.text, m.images);
+    } else if (m.type === "send") {
+      if (turnRunning && m.mode) {
+        // Like the host: a prompt during a turn is either folded into it or held until it ends.
+        const turnId = "t" + ++n;
+        if (m.mode === "queue") {
+          queued.set(turnId, m);
+          emit({ type: "submitted", turnId, disposition: "queued", text: m.text });
+        } else emit({ type: "submitted", turnId, disposition: "steered", text: m.text });
+      } else {
+        turnRunning = true;
+        turn(m.text, m.images).finally(() => {
+          turnRunning = false;
+          const next = queued.entries().next().value;
+          if (next) {
+            queued.delete(next[0]);
+            nextTurnId = next[0]; // a held message launches under the id the host gave it when it was held
+            turnRunning = true;
+            turn(next[1].text, next[1].images).finally(() => (turnRunning = false));
+          }
+        });
+      }
+    } else if (m.type === "unqueue") {
+      if (queued.delete(m.turnId)) emit({ type: "unqueued", turnId: m.turnId });
+    } else if (m.type === "pickFiles") {
+      post({ type: "picked", images: [], mentions: ["@src/index.ts", "@docs/my notes.md".replace(/^@(.*)$/, '@"$1"')], skipped: ["notes.txt is outside this chat's folders, so Muse's file tools would refuse it. Use \"Add folder\" for its folder first."] });
+    } else if (m.type === "addFolder") {
+      folders.push("D:\\work\\shared-lib");
+      post({ type: "folders", folders: [...folders] });
+    } else if (m.type === "removeFolder") {
+      folders = folders.filter((p) => p !== m.path);
+      post({ type: "folders", folders: [...folders] });
+    } else if (m.type === "listSkills") {
+      setTimeout(() => post({ type: "skills", skills: [
+        { selector: "plan", displayName: "plan", description: "Write a plan before changing code.", source: "bundled" },
+        { selector: "doctor", displayName: "doctor", description: "Check the Muse installation and settings.", source: "bundled" },
+        { selector: "fix-bug", displayName: "Fix a bug", description: "Reproduce, find the cause and fix a bug with a test.", source: "user", argumentHint: "<issue or error>" },
+        { selector: "acme:deploy", displayName: "Deploy", description: "Deploy to staging.", source: "plugin", pluginId: "acme", argumentHint: "[environment]" },
+      ] }), 200);
+    } else if (m.type === "listConnectors") {
+      setTimeout(() => post({ type: "extras", kind: "connectors", rows: [
+        { name: "github", source: "settings", transport: "streamableHttp", oauth: "loggedIn" },
+        { name: "filesystem", source: "plugin", transport: "stdio", oauth: "notSupported" },
+      ] }), 200);
+    } else if (m.type === "listPlugins") {
+      setTimeout(() => post({ type: "extras", kind: "plugins", rows: [{ id: "acme", version: "1.2.0", enabled: true, source: "marketplaceUserAdded" }] }), 200);
+    }
     else if (m.type === "decide") decisions.get(m.approvalId)?.({ decision: m.choiceId === "c-deny" ? "denied" : m.choiceId === "c-once" ? "approved" : m.choiceId === "c-session" ? "approvedForSession" : "approvedPolicyAmendment" });
     else if (m.type === "setProfile") {
       profileId = m.profileId;

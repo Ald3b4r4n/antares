@@ -6,7 +6,7 @@
 //
 // Usage: node scripts/e2e-editor.mjs <path-to-editor-exe> [label]
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -232,7 +232,7 @@ try {
     while (Date.now() < deadline) {
       const state = await evalWeb(`(() => {
         const c = d.querySelector('.approval.pending');
-        const idle = !d.getElementById('send').hidden && d.querySelectorAll('.msg.assistant').length > 0;
+        const idle = d.getElementById('stop').hidden && d.querySelectorAll('.msg.assistant').length > 0;
         return { idle, status: d.getElementById('meta').textContent.slice(0, 60), card: c ? { kind: c.querySelector('.badge').textContent, subject: c.querySelector('.approval-subject').textContent, choices: [...c.querySelectorAll('button.choice')].map(b => b.querySelector('.choice-label').textContent), previews: [...c.querySelectorAll('.rule-preview')].map(x => x.textContent), flags: [...c.querySelectorAll('.approval-flag')].map(x => x.textContent), feedback: !!c.querySelector('.approval-feedback') } : null };
       })()`);
       if (state.card) {
@@ -256,7 +256,7 @@ try {
       resolved: [...d.querySelectorAll('.approval.resolved')].map(c => c.className.replace('approval ', '') + ' | ' + c.querySelector('.approval-outcome')?.textContent),
       tools: [...d.querySelectorAll('.tool')].map(t => t.className.replace('tool ', '') + ' | ' + t.querySelector('.tool-name')?.textContent),
       assistant: [...d.querySelectorAll('.msg.assistant .body')].map(b => b.textContent.slice(0, 100)),
-      idle: !d.getElementById('send').hidden
+      idle: d.getElementById('stop').hidden
     })`);
     console.log("REAL:", JSON.stringify({ seen, end }));
     const first = seen[0];
@@ -275,7 +275,7 @@ try {
   } else {
   // Send a message through the real UI path and watch the reply stream in.
   await evalWeb(`(() => { const i = d.getElementById('input'); i.value = 'hello from the real editor'; i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`);
-  await waitFor("the reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length > 0 && !d.getElementById('send').hidden"), 30000);
+  await waitFor("the reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length > 0 && d.getElementById('stop').hidden"), 30000);
   await sleep(600);
   const chat = await evalWeb(`({ user: d.querySelector('.msg.user .body')?.textContent, assistant: d.querySelector('.msg.assistant .body')?.textContent, copyButtons: d.querySelectorAll('button.copy').length, status: d.getElementById('meta').textContent.slice(0, 60) })`);
   console.log("CHAT:", JSON.stringify(chat));
@@ -367,7 +367,7 @@ try {
   check("Shift+Enter does not send", afterShift.users === 1, JSON.stringify(afterShift));
   await key("rawKeyDown", "Enter", { windowsVirtualKeyCode: 13, text: "\r" });
   await key("keyUp", "Enter", { windowsVirtualKeyCode: 13 });
-  await waitFor("the second reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length >= 2 && !d.getElementById('send').hidden"), 20000).catch(() => undefined);
+  await waitFor("the second reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length >= 2 && d.getElementById('stop').hidden"), 20000).catch(() => undefined);
   const afterEnter = await evalWeb("({ users: d.querySelectorAll('.msg.user').length, last: [...d.querySelectorAll('.msg.user')].pop()?.querySelector('.body').textContent })");
   check("Enter sends the typed message", afterEnter.users === 2, JSON.stringify(afterEnter));
 
@@ -384,10 +384,97 @@ try {
   check("pasted image shows a thumbnail under the real webview CSP", thumb.loaded && thumb.w === 64, JSON.stringify(thumb));
   await shot("07-image-attached");
   await evalWeb(`(() => { const i = d.getElementById('input'); i.value = 'image check'; i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`);
-  await waitFor("the image reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length >= 3 && !d.getElementById('send').hidden"), 20000);
+  await waitFor("the image reply", () => evalWeb("d.querySelectorAll('.msg.assistant').length >= 3 && d.getElementById('stop').hidden"), 20000);
   const sent = await evalWeb("({ text: [...d.querySelectorAll('.msg.user')].pop()?.querySelector('.body').textContent, chips: [...d.querySelectorAll('.msg.user')].pop()?.querySelectorAll('.chip').length, thumbOk: [...d.querySelectorAll('.msg.user')].pop()?.querySelector('.sent-thumb')?.naturalWidth > 0 })");
   check("the image is sent and shown as a chip with its thumbnail", sent.chips === 1 && sent.thumbOk, JSON.stringify(sent));
   await shot("08-image-sent");
+
+  // The composer's "+" menu, in the real window: files and photos, a folder, slash commands, connectors and
+  // plugins. The host-side dialogs are replaced by `antares.dev.picks` (a native file dialog is not in the
+  // DOM). The echo provider answers, so this costs nothing; the skill list, the connector list and the
+  // plugin list come from the real `muse serve` of this machine.
+  if (!REAL) {
+    const settingsFile = join(workspace, ".vscode", "settings.json");
+    const setPicks = async (paths) => {
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, "utf8")), "antares.dev.picks": paths }, null, 2));
+      await sleep(2500); // the editor re-reads the settings file
+    };
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    const extraDir = join(work, "extra-lib");
+    mkdirSync(extraDir, { recursive: true });
+    writeFileSync(join(extraDir, "lib.txt"), "library\n");
+    writeFileSync(join(workspace, "my notes.txt"), "notes\n");
+    writeFileSync(join(workspace, "pic.png"), png);
+    writeFileSync(join(work, "outside.txt"), "outside\n");
+    const errorNotices = () => evalWeb("d.querySelectorAll('.notice.error').length");
+
+    // The menu.
+    await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
+    const menu = await evalWeb("({ open: !d.getElementById('plusMenu').hidden, expanded: d.getElementById('plus').getAttribute('aria-expanded'), items: [...d.querySelectorAll('#plusMenu .menu-item')].map(b => b.querySelector('span').textContent) })");
+    check("the + button opens a menu with files, folder, slash commands, connectors and plugins", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Slash commands", "Connectors", "Plugins"]), JSON.stringify(menu));
+    await shot("15-plus-menu");
+
+    // Files and photos: a text file inside the workspace becomes @path, a name with a space is quoted, a photo
+    // becomes a thumbnail, and a file outside the workspace is refused with an explanation.
+    await setPicks([join(workspace, "hello.txt"), join(workspace, "my notes.txt"), join(workspace, "pic.png"), join(work, "outside.txt")]);
+    await evalWeb("(() => { d.querySelector('#plusMenu [data-act=files]').click(); return true; })()");
+    await waitFor("the picked files", () => evalWeb("d.getElementById('input').value.includes('@hello.txt') && d.querySelectorAll('#attachments .thumb').length === 1"), 15000);
+    const picked = await evalWeb("({ input: d.getElementById('input').value, thumbs: d.querySelectorAll('#attachments .thumb').length, notices: [...d.querySelectorAll('.notice')].map(n => n.textContent.slice(0, 90)), menuClosed: d.getElementById('plusMenu').hidden })");
+    check("files become @mentions (spaces quoted), a photo becomes a thumbnail, the menu closes", picked.input.includes("@hello.txt") && picked.input.includes('@"my notes.txt"') && picked.thumbs === 1 && picked.menuClosed, JSON.stringify(picked));
+    check("a file outside the workspace is refused with an explanation instead of a useless mention", picked.notices.some((n) => /outside\.txt is outside/.test(n)) && !picked.input.includes("outside"), JSON.stringify(picked.notices));
+    await shot("16-files-picked");
+    await evalWeb("(() => { d.querySelector('.thumb-remove').click(); const i = d.getElementById('input'); i.value = ''; return true; })()");
+
+    // Ctrl+U asks for files, like the + menu item.
+    await setPicks([join(workspace, "hello.txt")]);
+    await evalWeb("(() => { w.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'u', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()");
+    await waitFor("Ctrl+U to pick files", () => evalWeb("d.getElementById('input').value.includes('@hello.txt')"), 15000);
+    check("Ctrl+U opens the same file pick", true);
+    await evalWeb("(() => { d.getElementById('input').value = ''; return true; })()");
+
+    // A folder: the grant asks first (the workbench's own modal), then shows as a chip and goes with the next message.
+    await setPicks([extraDir]);
+    await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=folder]').click(); return true; })()");
+    const grant = await waitFor("the folder confirmation", () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 260), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()"), 15000);
+    check("adding a folder asks first and says what it grants", /Give Muse access to/.test(grant.text) && /Project Trust/.test(grant.text) && grant.buttons.some((b) => /Add folder/.test(b)), JSON.stringify(grant));
+    await shot("17-folder-confirm");
+    await evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => /Add folder/.test(x.textContent)); btn.click(); return true; })()");
+    await waitFor("the folder chip", () => evalWeb("d.querySelectorAll('#folders .folder-chip').length === 1"), 10000);
+    const chip = await evalWeb("({ text: d.querySelector('#folders .folder-chip span').textContent, hidden: d.getElementById('folders').hidden })");
+    check("the added folder shows as a removable chip", !chip.hidden && /extra-lib/.test(chip.text), JSON.stringify(chip));
+    const errorsBefore = await errorNotices();
+    const repliesBefore = await evalWeb("d.querySelectorAll('.msg.assistant').length");
+    await evalWeb("(() => { const i = d.getElementById('input'); i.value = 'after adding a folder'; i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()");
+    await waitFor("the reply after adding a folder", () => evalWeb(`d.querySelectorAll('.msg.assistant').length > ${repliesBefore} && d.getElementById('stop').hidden`), 20000);
+    check("the real host accepts the turn that carries the added folder (canonical path)", (await errorNotices()) === errorsBefore, `errors before ${errorsBefore}, after ${await errorNotices()}`);
+    await shot("18-folder-turn");
+
+    // Slash commands: the palette lists the real host's skills; a typed /skill goes as a skill part.
+    await evalWeb("(() => { const i = d.getElementById('input'); i.focus(); i.value = '/'; i.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()");
+    await waitFor("the slash palette", () => evalWeb("!d.getElementById('slashMenu').hidden && d.querySelectorAll('#slashMenu .slash-item').length > 0"), 25000);
+    const slash = await evalWeb("({ names: [...d.querySelectorAll('#slashMenu .slash-name')].map(n => n.textContent), badges: [...new Set([...d.querySelectorAll('#slashMenu .badge')].map(n => n.textContent))] })");
+    check("typing / lists the host's skills with their source", slash.names.includes("/plan") && slash.names.length >= 3, JSON.stringify({ count: slash.names.length, hasPlan: slash.names.includes("/plan"), sources: slash.badges }));
+    await shot("19-slash-palette");
+    await evalWeb("(() => { const i = d.getElementById('input'); i.value = '/pla'; i.dispatchEvent(new w.Event('input', { bubbles: true })); i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()");
+    const picked2 = await evalWeb("({ input: d.getElementById('input').value, menuHidden: d.getElementById('slashMenu').hidden, users: d.querySelectorAll('.msg.user').length })");
+    check("Enter in the palette completes the skill name and does not send", picked2.input === "/plan " && picked2.menuHidden, JSON.stringify(picked2));
+    const repliesBeforeSkill = await evalWeb("d.querySelectorAll('.msg.assistant').length");
+    await evalWeb("(() => { const i = d.getElementById('input'); i.value = '/plan tidy the README'; i.dispatchEvent(new w.Event('input', { bubbles: true })); i.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()");
+    await waitFor("the skill turn", () => evalWeb(`d.querySelectorAll('.msg.assistant').length > ${repliesBeforeSkill} && d.getElementById('stop').hidden`), 30000);
+    const skillTurn = await evalWeb("({ user: [...d.querySelectorAll('.msg.user')].pop()?.querySelector('.body').textContent, reply: [...d.querySelectorAll('.msg.assistant')].pop()?.querySelector('.body').textContent.slice(0, 40), errors: d.querySelectorAll('.notice.error').length })");
+    check("a typed /skill is accepted by the real host as a skill invocation", /^\/plan tidy the README/.test(skillTurn.user) && /^echo:/.test(skillTurn.reply) && skillTurn.errors === errorsBefore, JSON.stringify(skillTurn));
+    await shot("20-skill-turn");
+
+    // Connectors and plugins: read-only lists from the real host (nothing is set up in this throwaway config).
+    for (const [act, title] of [["connectors", /Connectors/], ["plugins", /Plugins/]]) {
+      await evalWeb(`(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=${act}]').click(); return true; })()`);
+      await waitFor(`the ${act} list`, () => evalWeb("!d.getElementById('extrasPanel').hidden && d.getElementById('extrasStatus').textContent !== 'Reading from Muse…'"), 30000);
+      const extras = await evalWeb("({ title: d.getElementById('extrasTitle').textContent, status: d.getElementById('extrasStatus').textContent, rows: d.querySelectorAll('#extrasList li').length })");
+      check(`the ${act} list answers from the real host (rows or a clear empty state), read-only`, title.test(extras.title) && !/^Could not/.test(extras.status) && /read-only/.test(extras.status), JSON.stringify(extras));
+      await shot(`21-${act}`);
+      await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
+    }
+  }
 
   // Profile change: a native modal confirmation (workbench dialog), then a fresh chat with the new profile.
   await evalWeb(`(() => { const s = d.getElementById('profile'); s.value = ':ask-me'; s.dispatchEvent(new w.Event('change')); return true; })()`);

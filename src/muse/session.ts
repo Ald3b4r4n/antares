@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { MuseHost, MspError } from "./host.ts";
 import { mapApprovalRequest, mapModels, mapNotification, mapUsage, type ChatEvent, type ModelInfo } from "./events.ts";
+import { canonicalPath, mapPlugins, mapSkills, parseSlash, rootsFor, type PluginRow, type SkillRow } from "./composer.ts";
 import { buildInputParts, validateImages, type ImageInput } from "./images.ts";
 import { mapSessionRows, readHistory, type SessionRowView } from "./sessions.ts";
 import { uuidv7 } from "./uuidv7.ts";
@@ -57,6 +58,9 @@ export class MuseSession extends EventEmitter {
   private catalog: ModelInfo[] = [];
   private modelId?: string;
   private effort?: string;
+  private skills?: SkillRow[];
+  private extraRoots: string[] = [];
+  private rootsDirty = false;
   /**
    * Approval stages already shown, as "approvalId#stage". The host announces each approval twice (as the
    * `approval/request` it expects a receipt for, and as an `approval/requested` notification), and
@@ -131,6 +135,7 @@ export class MuseSession extends EventEmitter {
       this.sessionId = undefined;
       this.starting = undefined;
       this.hostReady = undefined;
+      this.skills = undefined;
       this.announcedApprovals.clear();
       this.emit("exit", code);
     });
@@ -299,20 +304,66 @@ export class MuseSession extends EventEmitter {
   /**
    * Sends one user prompt (text and/or images). Resolves when the host accepted it, not when the
    * turn ends. Images are validated here as well, because they come from the webview.
+   *
+   * `ifBusy` says what to do when a turn is already running: `steer` folds the prompt into it, `queue`
+   * holds it until the turn ends. Left out, the host's default (queue) applies. A typed `/skill args` is
+   * sent as a `skill` part when the selector is in the host's own list. What the host did with the
+   * prompt is announced as a "submitted" event.
    */
-  async send(text: string, images: ImageInput[] = []): Promise<void> {
+  async send(text: string, images: ImageInput[] = [], options: { ifBusy?: "queue" | "steer" } = {}): Promise<void> {
     const checked = validateImages(images);
     if (!checked.ok) throw new Error(checked.error);
-    const input = buildInputParts(text, checked.images);
-    if (input.length === 0) throw new Error("There is nothing to send.");
+    if (text.trim() === "" && checked.images.length === 0) throw new Error("There is nothing to send.");
     await this.start();
     if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
-    await this.host.request("turn/start", {
+    // The skill list is read once per session (a typed "/" in the first message needs it); a failure just
+    // means the text goes as plain text.
+    if (text.trim().startsWith("/") && this.skills === undefined) await this.listSkills().catch(() => undefined);
+    const skill = parseSlash(text, this.skills ?? []);
+    const input = buildInputParts(text, checked.images, skill);
+    if (input.length === 0) throw new Error("There is nothing to send.");
+    const roots = this.rootsDirty ? { workspaceRoots: rootsFor(this.options.workspaceRoot, this.extraRoots).map(canonicalPath) } : {};
+    const result = await this.host.request<{ turnId?: unknown; disposition?: unknown }>("turn/start", {
       commandId: uuidv7(),
       sessionId: this.sessionId,
       input,
+      ...(options.ifBusy ? { ifBusy: options.ifBusy } : {}),
       ...(this.effort ? { reasoningEffort: this.effort } : {}),
+      ...roots,
     }, 30_000);
+    this.rootsDirty = false;
+    const disposition = result.disposition === "queued" || result.disposition === "steered" ? result.disposition : "started";
+    if (typeof result.turnId === "string") this.emitEvent({ type: "submitted", turnId: result.turnId, disposition, text });
+  }
+
+  /**
+   * The folders the user added to this chat besides the workspace. The host takes the whole set at the next
+   * turn (a sticky replacement), so the chat's own folder is always part of it. Takes effect on the next
+   * message; a folder that is removed again is dropped the same way.
+   */
+  setExtraRoots(roots: string[]): void {
+    this.extraRoots = [...roots];
+    this.rootsDirty = true;
+  }
+
+  /** The session's user-invocable skills (starts the session, which is a host-side record but no model call). */
+  async listSkills(): Promise<SkillRow[]> {
+    await this.start();
+    if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
+    this.skills = mapSkills(await this.host.request("skill/list", { sessionId: this.sessionId }, 20_000));
+    return this.skills;
+  }
+
+  async listPlugins(): Promise<PluginRow[]> {
+    await this.start();
+    if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
+    return mapPlugins(await this.host.request("plugin/list", { sessionId: this.sessionId }, 20_000));
+  }
+
+  /** Takes a queued prompt back before it launches. Admission is the race: a launched turn is not stopped. */
+  async unqueue(turnId: string): Promise<void> {
+    if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
+    await this.host.request("turn/unqueue", { commandId: uuidv7(), sessionId: this.sessionId, turnId }, 15_000);
   }
 
   /**

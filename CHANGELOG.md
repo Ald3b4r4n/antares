@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased — phase 2B: composer "+" menu
+
+- A "+" button replaces the attach button and opens a menu: **Add files or photos** (Ctrl+U), **Add folder**, **Slash commands**, **Connectors**, **Plugins**.
+- Files and photos: chosen with the editor's own file dialog. Images (PNG, JPEG, GIF, WebP, up to 5 MB) become attachments with the same checks as a pasted one; other files become `@relative/path` mentions (quoted when the path has spaces); a file outside the workspace folders is refused with an explanation, because the host's file tools would refuse it.
+- Add folder: asks first in a modal that says what it grants (and that Project Trust is not granted), shows a removable chip, is sent as the sticky `workspaceRoots` set with the next message (chat folder first, canonical paths, which the real host requires) and ends with the chat.
+- Slash commands: typing `/` first opens a palette of the host's skills (`skill/list`: source, description, argument hint); Enter or Tab completes; `/skill args` goes as a `skill` input part only when the selector is in the host's list (the real host refuses unknown ones), otherwise as plain text.
+- Connectors (`mcpServer/list`, experimental, on a short-lived host) and Plugins (`plugin/list`) as read-only lists. Managing them is phase 3A.
+- Queue: while a turn runs the box stays usable; Enter steers the running turn (`ifBusy: steer`), Ctrl+Enter or the Queue button holds the message (`ifBusy: queue`) in a list above the box with a Remove button (`turn/unqueue`); the host's answer (`started`, `queued`, `steered`) is shown.
+- Setting `antares.dev.picks` (development only) replaces the native file and folder dialogs so the real-window check can drive them.
+- Checked: 15 new unit tests (112 in total), the real host with the echo provider (skill part, canonical roots, mention), and 32 real-window checks each in VS Code 1.143.1 and Antigravity IDE 1.107.0. Findings in `docs/PROTOCOL-NOTES.md`.
+- Not done: dragging files from the Explorer, "current file" and "selection" mentions, `skill/import`, a check with a real model that the agent reads an added folder.
+
 ## Unreleased — phase 2A: voice input
 
 - Microphone button in the composer. The recognized text is inserted at the caret for review; nothing is sent automatically. `Esc` cancels a recording.

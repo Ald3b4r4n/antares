@@ -175,6 +175,12 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "Development only: fake recorder and transcriber (no microphone, no engine)."
+        },
+        "antares.dev.picks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Development only: absolute paths used instead of the file dialog of the composer's `+` menu, and, as the first entry, instead of the folder dialog. For automated tests."
         }
       }
     }
@@ -188,7 +194,7 @@
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
     "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
-    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts",
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts test/unit/composer.test.ts",
     "test:e2e": "node esbuild.mjs && node scripts/e2e-editor.mjs"
   },
   "devDependencies": {

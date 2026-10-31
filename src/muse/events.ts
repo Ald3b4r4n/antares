@@ -62,6 +62,9 @@ export const PROFILES: { id: string; label: string; note: string }[] = [
 
 export type ChatEvent =
   | { type: "turnStarted"; turnId: string }
+  /** What the host did with a submitted prompt: ran it (`started`), held it (`queued`) or folded it into the running turn (`steered`). */
+  | { type: "submitted"; turnId: string; disposition: "started" | "queued" | "steered"; text: string }
+  | { type: "unqueued"; turnId: string }
   | { type: "userMessage"; itemId: string; text: string; attachments: AttachmentInfo[] }
   | { type: "assistantStarted"; itemId: string }
   | { type: "assistantDelta"; itemId: string; delta: string }
@@ -152,6 +155,10 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
     case "turn/started": {
       const turnId = str(params.turnId);
       return turnId ? { type: "turnStarted", turnId } : undefined;
+    }
+    case "turn/unqueued": {
+      const turnId = str(params.turnId);
+      return turnId ? { type: "unqueued", turnId } : undefined;
     }
     case "turn/foregroundCompleted": {
       const turnId = str(params.turnId);

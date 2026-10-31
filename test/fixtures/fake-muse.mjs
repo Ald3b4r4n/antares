@@ -15,6 +15,8 @@ const mode = process.env.FAKE_MUSE_MODE ?? "normal";
 rec("argv", process.argv.slice(2));
 
 let activeModel = "muse-wonder-1.0";
+let turnActive = false;
+let queuedCount = 0;
 const CATALOG = [
   { modelId: "muse-wonder-1.0", displayLabel: "muse-wonder-1.0", providerId: "meta", profileId: "tbh", releaseDate: "2026-10-12", description: null, contextLimit: 1007997, outputLimit: 128000, cost: null, isDefault: true, variants: ["minimal", "low", "high", "max"], reasoningEffortVariants: [], defaultReasoningEffort: "high" },
   { modelId: "muse-spark-1.2", displayLabel: "muse-spark-1.2", providerId: "meta", profileId: "tbh", releaseDate: "2026-08-05", description: null, contextLimit: 1007997, outputLimit: 128000, cost: null, isDefault: false, variants: ["minimal", "high", "xhigh"], reasoningEffortVariants: [{ tier: "xhigh", description: "Use this for deepest analysis and complex fixes." }], defaultReasoningEffort: "high" },
@@ -111,13 +113,37 @@ rl.on("line", (line) => {
       send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted" } });
       send({ method: "session/modelChanged", params: { sessionId: msg.params.sessionId, modelId: activeModel, providerId: "meta", source: "user", viewCursor: "v4:s1:2", sourceRange: {} } });
       break;
+    case "skill/list":
+      rec("skill-list", msg.params);
+      send({ id: msg.id, result: { skills: [
+        { selector: "plan", displayName: "plan", description: "Write a plan first.", source: "bundled" },
+        { selector: "fix-bug", displayName: "fix-bug", title: "Fix a bug", description: "Reproduce and fix.", source: "user", argumentHint: "<issue>" },
+        { selector: "acme:deploy", displayName: "deploy", description: "Deploy.", source: "plugin", pluginId: "acme" },
+      ] } });
+      break;
+    case "plugin/list":
+      rec("plugin-list", msg.params);
+      send({ id: msg.id, result: { plugins: [{ id: "acme", version: "1.2.0", enabled: true, source: "marketplaceUserAdded" }] } });
+      break;
+    case "turn/unqueue":
+      rec("unqueue", msg.params);
+      send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", turnId: msg.params.turnId } });
+      send({ method: "turn/unqueued", params: { sessionId: "s1", turnId: msg.params.turnId, commandId: msg.params.commandId, viewCursor: "v4:s1:7", sourceRange: {} } });
+      break;
     case "turn/start":
       rec("turnStart", msg.params);
+      if (turnActive) {
+        // A turn is running (it waits for an approval): the prompt is folded into it or held, as `ifBusy` says.
+        const steered = msg.params.ifBusy === "steer";
+        send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", turnId: steered ? "t1" : `tq${++queuedCount}`, startedNewTurn: false, disposition: steered ? "steered" : "queued" } });
+        break;
+      }
       send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", turnId: "t1", startedNewTurn: true, disposition: "started" } });
       if (mode === "no-approval") {
         send({ method: "turn/completed", params: { sessionId: "s1", turnId: "t1", terminal: "completed", durationMs: 1, viewCursor: "v4:s1:9", sourceRange: {} } });
         break;
       }
+      turnActive = true;
       send({ method: "turn/started", params: { sessionId: "s1", turnId: "t1", commandId: msg.params.commandId, viewCursor: "v4:s1:1", sourceRange: {} } });
       // The real host announces an approval twice: as the request it wants a receipt for and as a
       // notification. Both orders were possible, so FAKE_MUSE_ORDER picks one.
@@ -135,11 +161,13 @@ rl.on("line", (line) => {
       }
       send({ id: msg.id, result: { approvalId: msg.params.approvalId, commandId: msg.params.commandId, status: "accepted", terminal: true } });
       send({ method: "approval/resolved", params: { approvalId: msg.params.approvalId, decision: "denied", policyResult: "deny", resolvedBy: "user", itemId: "tool-1", sessionId: "s1", turnId: "t1", stageEvidence: [], sourceRange: {}, viewCursor: "v4:s1:4" } });
+      turnActive = false;
       send({ method: "turn/completed", params: { sessionId: "s1", turnId: "t1", terminal: "completed", durationMs: 5, viewCursor: "v4:s1:5", sourceRange: {} } });
       break;
     case "turn/interrupt":
       rec("interrupt", msg.params);
       send({ id: msg.id, result: { status: "accepted" } });
+      turnActive = false;
       send({ method: "turn/completed", params: { sessionId: "s1", turnId: "t1", terminal: "cancelled", viewCursor: "v4:s1:6", sourceRange: {} } });
       break;
     default:

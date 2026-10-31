@@ -30,16 +30,18 @@ Chat com streaming, copiar/colar, imagens (colar, soltar, anexar), perfil por ch
 | Gravação em macOS e Linux | cliente | **pendente** (só o lado Whisper é multiplataforma) |
 | Teste na janela real | cliente | **feito** no VS Code 1.143.1 e no Antigravity IDE 1.107.0 (falso, erro e microfone/Whisper reais) |
 
-### 2B. Menu "+" do compositor (inspirado na segunda captura)
+### 2B. Menu "+" do compositor (pronta; inspirada na segunda captura)
 
-| Item da captura | O que o Muse oferece | Observação |
+| Item da captura | O que o Muse oferece | Estado |
 |---|---|---|
-| **Adicionar arquivos ou fotos (Ctrl+U)** | Fotos: parte `image` (**pronto**). Arquivos: **só** menção `@caminho/relativo` no texto; não existe parte "arquivo" | Arquivo fora do workspace não é lido pela ferramenta (observado: recusa). Seletor, arrastar do Explorer, "arquivo atual" e "seleção" viram menções |
-| **Adicionar pasta** | `turn/start.workspaceRoots` (substitui de forma persistente as raízes) | **Concede acesso** à pasta conforme o perfil: exige confirmação e mostra o que muda. Não concede Project Trust |
-| **Comandos de barra** | `skill/list` e parte `skill` (`/nome argumentos`); `skill/import` | Estável. Mostra as skills do usuário, do projeto, do plugin e as embutidas |
-| **Conectores** | `mcpServer/list`, OAuth (`mcpServer/oauthLogin`), `session.config.mcpServers` na criação | `mcpServer/*` é **experimental**; a configuração só vale na criação da sessão |
-| **Adicionar plugins** | `plugin/list`, `plugin/install`, `plugin/marketplaceAdd/Update/Remove` | Estável. Instalar plugin executa código de terceiros: confirmação e origem visíveis |
-| **Fila (Ctrl+Enter)** | `turn/start.ifBusy: queue, steer, replace`; `turn/steer`, `turn/unqueue` | Enter orienta o turno em andamento; Ctrl+Enter enfileira; lista de pendentes com remover |
+| **Adicionar arquivos ou fotos (Ctrl+U)** | Fotos: parte `image`. Arquivos: **só** menção `@caminho/relativo` no texto; não existe parte "arquivo" | **Pronto.** O seletor é do editor (o webview não abre diálogo de arquivo). Foto de até 5 MB vira miniatura (mesmas verificações de colar/soltar); arquivo dentro do workspace ou de uma pasta adicionada vira `@caminho` (com aspas se houver espaço, **palpite da Antares**, não verificado); arquivo fora das pastas é recusado com explicação, porque a ferramenta do host recusa. Pendente: arrastar do Explorer, "arquivo atual" e "seleção" |
+| **Adicionar pasta** | `turn/start.workspaceRoots` (substituição persistente do conjunto) | **Pronto.** Pergunta antes (diálogo modal que diz o que concede e que **não** concede Project Trust), aparece como chip removível, vale a partir da próxima mensagem e termina com o chat. O host exige **caminho canônico** (`\\?\C:\...`), observado. **Não verificado com modelo real:** se a ferramenta de leitura de fato lê dentro da pasta adicionada |
+| **Comandos de barra** | `skill/list` e parte `skill` | **Pronto.** `/` no início abre a paleta com as skills do host (origem, descrição, dica de argumento); Enter/Tab completa; `/skill args` vai como parte `skill` **só se** o seletor estiver na lista (o host recusa seletor desconhecido, observado). Pendente: `skill/import` |
+| **Conectores** | `mcpServer/list` (experimental), OAuth, `session.config.mcpServers` na criação | **Lista somente leitura** (nome, origem, transporte, login). Adicionar, entrar (OAuth) e remover ficam na 3A |
+| **Adicionar plugins** | `plugin/list`, `plugin/install`, `plugin/marketplace*` | **Lista somente leitura.** Instalar plugin executa código de terceiros: fica na 3A com confirmação e origem visíveis |
+| **Fila (Ctrl+Enter)** | `turn/start.ifBusy`; `turn/unqueue` | **Pronto.** Com um turno em andamento, Enter orienta (`steer`) e Ctrl+Enter ou o botão Queue enfileira; a fila aparece acima do campo com "Remove" (`turn/unqueue`). `replace` não é oferecido (descartaria o turno em andamento). Remover uma mensagem já iniciada não foi exercitado no host real |
+
+Verificado: 15 testes unitários novos (112 no total), host real com provedor echo (parte `skill`, `workspaceRoots` canônico, `@arquivo`), e janela real no VS Code 1.143.1 e no Antigravity IDE 1.107.0 (32 checagens cada, sem chamada de modelo). A fila só foi vista no host falso, no preview e com o host real em chamadas `turn/start` seguidas; um turno do provedor echo termina rápido demais para a janela real.
 
 ### 2C. Modos de permissão (inspirado na primeira captura)
 

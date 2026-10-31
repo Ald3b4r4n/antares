@@ -17,8 +17,16 @@
   const historyStatus = $("historyStatus");
   const historySearch = $("historySearch");
   const historyAll = $("historyAll");
-  const attachBtn = $("attach");
-  const fileInput = $("file");
+  const plusBtn = $("plus");
+  const plusMenu = $("plusMenu");
+  const slashMenu = $("slashMenu");
+  const queueBtn = $("queue");
+  const pendingEl = $("pending");
+  const foldersEl = $("folders");
+  const extrasPanel = $("extrasPanel");
+  const extrasTitle = $("extrasTitle");
+  const extrasStatus = $("extrasStatus");
+  const extrasList = $("extrasList");
   const micBtn = $("mic");
   const voiceStatus = $("voiceStatus");
 
@@ -39,6 +47,11 @@
     attachments: [], // pending images: { mediaType, base64Data, width, height, dataUrl, bytes }
     lastSent: [], // the images of the message just sent, restored if the send is refused
     sentQueue: [], // thumbnails of sent messages, matched to the host's userMessage by image count
+    pending: new Map(), // turnId -> text of a message the host is holding until the running turn ends
+    skills: undefined, // the host's skill list, once read (undefined = not asked yet)
+    skillsError: undefined,
+    skillsAsked: false, // a read is in flight or failed; the "Slash commands" menu item retries after a failure
+    slash: { open: false, index: 0 },
     models: [],
     modelId: undefined, // the user's remembered choice, if any
     effort: undefined, // undefined = the model's default
@@ -377,9 +390,12 @@
     state.statusText = text;
     modelSel.disabled = running || state.models.length === 0;
     effortSel.disabled = running || state.models.length === 0;
-    sendBtn.disabled = running;
+    // While a turn runs the box stays usable: Enter steers it, Ctrl+Enter queues the message.
+    sendBtn.textContent = running ? "Steer" : "Send";
+    sendBtn.title = running ? "Add this to the running turn (Enter)" : "";
+    queueBtn.hidden = !running;
     stopBtn.hidden = !running;
-    sendBtn.hidden = running;
+    input.placeholder = running ? "Enter steers the running turn · Ctrl+Enter queues" : "Message Muse…  (/ for skills)";
     renderMeta();
   }
 
@@ -401,7 +417,7 @@
     }
     profileSel.value = state.profileId;
     const current = state.profiles.find((p) => p.id === state.profileId);
-    hint.textContent = (current ? "Profile " + current.id + ": " + current.note + " " : "") + "Enter sends · Shift+Enter adds a line · paste, drop or attach images.";
+    hint.textContent = (current ? "Profile " + current.id + ": " + current.note + " " : "") + "Enter sends · Shift+Enter adds a line · / for skills · Ctrl+U adds files · paste or drop images.";
     renderMeta();
   }
   profileSel.addEventListener("change", () => {
@@ -416,7 +432,16 @@
       case "turnStarted":
         state.turnNote = "";
         state.background.clear();
+        removePending(e.turnId); // a held message has launched
         setRunning(true, "Thinking…");
+        break;
+      case "submitted":
+        // The host held the message (queued) until the running turn ends; show it where it can be taken back.
+        if (e.disposition === "queued") addPending(e.turnId, e.text);
+        else if (e.disposition === "steered") addNotice("info", "Added to the running turn.");
+        break;
+      case "unqueued":
+        removePending(e.turnId);
         break;
       case "userMessage": {
         // Count images by the "[Image #n]" markers as well: an ephemeral host sends the markers but an empty
@@ -540,8 +565,19 @@
     else if (msg.type === "voice") onVoiceState(msg);
     else if (msg.type === "voiceResult") onVoiceResult(msg);
     else if (msg.type === "voiceError") onVoiceError(msg);
+    else if (msg.type === "picked") onPicked(msg);
+    else if (msg.type === "folders") renderFolders(msg.folders || []);
+    else if (msg.type === "skills") onSkills(msg);
+    else if (msg.type === "extras") onExtras(msg);
     else if (msg.type === "reset") {
       closeHistory();
+      closeExtras();
+      closeMenus();
+      state.pending.clear();
+      renderPending();
+      state.skills = undefined;
+      state.skillsError = undefined;
+      state.skillsAsked = false;
       for (const node of messages.querySelectorAll(".msg, .notice, .tool, .approval")) node.remove();
       state.items.clear();
       state.attachments = [];
@@ -733,10 +769,12 @@
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 220) + "px";
   }
-  function send() {
+  // `mode` only matters while a turn runs: "steer" folds the message into it, "queue" holds it.
+  function send(mode) {
     const text = input.value.trim();
     const images = state.attachments;
-    if ((!text && images.length === 0) || state.running) return;
+    if (!text && images.length === 0) return;
+    closeMenus();
     input.value = "";
     autosize();
     if (images.length) {
@@ -748,9 +786,251 @@
     vscode.postMessage({
       type: "send",
       text,
+      mode: state.running ? mode || "steer" : undefined,
       images: images.length ? images.map((a) => ({ mediaType: a.mediaType, base64Data: a.base64Data, width: a.width, height: a.height })) : undefined,
     });
   }
+
+  // ---- the "+" menu ----
+  const menuItems = () => [...plusMenu.querySelectorAll(".menu-item")];
+  function closeMenus() {
+    plusMenu.hidden = true;
+    plusBtn.setAttribute("aria-expanded", "false");
+    closeSlash();
+  }
+  function openPlusMenu() {
+    closeSlash();
+    plusMenu.hidden = false;
+    plusBtn.setAttribute("aria-expanded", "true");
+    const first = menuItems()[0];
+    if (first) first.focus();
+  }
+  plusBtn.addEventListener("click", () => (plusMenu.hidden ? openPlusMenu() : closeMenus()));
+  plusMenu.addEventListener("keydown", (ev) => {
+    const items = menuItems();
+    const at = items.indexOf(document.activeElement);
+    if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      items[(at + 1) % items.length].focus();
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      items[(at - 1 + items.length) % items.length].focus();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeMenus();
+      plusBtn.focus();
+    }
+  });
+  plusMenu.addEventListener("click", (ev) => {
+    const item = ev.target.closest(".menu-item");
+    if (!item) return;
+    const act = item.dataset.act;
+    closeMenus();
+    if (act === "files") vscode.postMessage({ type: "pickFiles" });
+    else if (act === "folder") vscode.postMessage({ type: "addFolder" });
+    else if (act === "slash") {
+      if (state.skillsError) {
+        state.skillsAsked = false;
+        state.skillsError = undefined;
+      }
+      if (!input.value.startsWith("/")) input.value = "/" + input.value;
+      input.focus();
+      input.setSelectionRange(1, 1);
+      updateSlash();
+    } else if (act === "connectors") openExtras("connectors");
+    else if (act === "plugins") openExtras("plugins");
+  });
+  document.addEventListener("click", (ev) => {
+    if (!plusMenu.hidden && !plusMenu.contains(ev.target) && !plusBtn.contains(ev.target)) closeMenus();
+  });
+  // Ctrl+U adds files or photos, as in the other assistants' composers.
+  window.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "u") {
+      ev.preventDefault();
+      vscode.postMessage({ type: "pickFiles" });
+    }
+  });
+
+  // What the extension host picked: photos become attachments (so they get the same checks and scaling as a
+  // pasted one), other files become @mentions in the text, and the rest is explained.
+  const fileFromBase64 = (name, mediaType, b64) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new File([bytes], name, { type: mediaType });
+  };
+  function onPicked(msg) {
+    for (const s of msg.skipped || []) addNotice("warning", s);
+    if ((msg.mentions || []).length) {
+      const base = input.value;
+      const missing = msg.mentions.filter((m) => !base.includes(m));
+      if (missing.length) {
+        input.value = (base === "" || /\s$/.test(base) ? base : base + " ") + missing.join(" ") + " ";
+        autosize();
+      }
+      input.focus();
+    }
+    const files = (msg.images || []).map((i) => fileFromBase64(i.name, i.mediaType, i.base64Data));
+    if (files.length) void addFiles(files);
+  }
+
+  // ---- folders added to this chat ----
+  function renderFolders(folders) {
+    foldersEl.replaceChildren();
+    foldersEl.hidden = folders.length === 0;
+    for (const path of folders) {
+      const chip = el("div", "folder-chip");
+      chip.title = path + " — the agent's file tools can reach this folder in this chat";
+      const label = el("span", "", path);
+      const remove = el("button", "", "×");
+      remove.title = "Remove this folder from the chat (applies from the next message)";
+      remove.setAttribute("aria-label", "Remove folder " + path);
+      remove.addEventListener("click", () => vscode.postMessage({ type: "removeFolder", path }));
+      chip.append(label, remove);
+      foldersEl.append(chip);
+    }
+  }
+
+  // ---- messages the host is holding (queue) ----
+  function addPending(turnId, text) {
+    state.pending.set(turnId, text);
+    renderPending();
+  }
+  function removePending(turnId) {
+    if (state.pending.delete(turnId)) renderPending();
+  }
+  function renderPending() {
+    pendingEl.replaceChildren();
+    pendingEl.hidden = state.pending.size === 0;
+    for (const [turnId, text] of state.pending) {
+      const li = el("li", "");
+      li.append(el("span", "badge", "queued"));
+      li.append(el("span", "pending-text", text));
+      const undo = el("button", "link tiny", "Remove");
+      undo.title = "Take this message back before it starts";
+      undo.addEventListener("click", () => vscode.postMessage({ type: "unqueue", turnId }));
+      li.append(undo);
+      pendingEl.append(li);
+    }
+  }
+
+  // ---- slash palette: "/" at the start of the message lists the host's skills ----
+  const slashQuery = () => {
+    const m = /^\/([^\s]*)$/.exec(input.value);
+    return m ? m[1] : undefined;
+  };
+  function closeSlash() {
+    state.slash.open = false;
+    slashMenu.hidden = true;
+  }
+  function slashRows() {
+    const q = (slashQuery() || "").toLowerCase();
+    const all = state.skills || [];
+    if (!q) return all;
+    const starts = all.filter((s) => s.selector.toLowerCase().startsWith(q));
+    const rest = all.filter((s) => !s.selector.toLowerCase().startsWith(q) && (s.selector + " " + s.displayName + " " + s.description).toLowerCase().includes(q));
+    return starts.concat(rest);
+  }
+  function updateSlash() {
+    if (slashQuery() === undefined) {
+      closeSlash();
+      return;
+    }
+    plusMenu.hidden = true;
+    state.slash.open = true;
+    slashMenu.hidden = false;
+    if (state.skills === undefined && !state.skillsAsked) {
+      state.skillsAsked = true;
+      vscode.postMessage({ type: "listSkills" });
+    }
+    renderSlash();
+  }
+  function renderSlash() {
+    slashMenu.replaceChildren();
+    if (state.skills === undefined) {
+      slashMenu.append(el("div", "slash-empty", state.skillsError ? "Could not read the skills: " + state.skillsError : "Reading the skills from Muse…"));
+      return;
+    }
+    const rows = slashRows();
+    if (rows.length === 0) {
+      slashMenu.append(el("div", "slash-empty", "No skill matches. A message starting with / that is not a skill is sent as plain text."));
+      return;
+    }
+    state.slash.index = Math.min(state.slash.index, rows.length - 1);
+    rows.forEach((s, i) => {
+      const row = el("div", "slash-item" + (i === state.slash.index ? " active" : ""));
+      row.setAttribute("role", "option");
+      row.append(el("span", "slash-name", "/" + s.selector));
+      if (s.argumentHint) row.append(el("span", "slash-hint", s.argumentHint));
+      row.append(el("span", "badge", s.source));
+      if (s.description) row.append(el("span", "slash-desc", s.description));
+      row.addEventListener("mousedown", (ev) => {
+        ev.preventDefault();
+        pickSkill(s);
+      });
+      slashMenu.append(row);
+    });
+    const active = slashMenu.querySelector(".slash-item.active");
+    if (active) active.scrollIntoView({ block: "nearest" });
+  }
+  function pickSkill(skill) {
+    input.value = "/" + skill.selector + " ";
+    autosize();
+    closeSlash();
+    input.focus();
+  }
+  function onSkills(msg) {
+    if (msg.error) {
+      state.skills = undefined;
+      state.skillsError = msg.error;
+    } else {
+      state.skills = msg.skills || [];
+      state.skillsError = undefined;
+    }
+    if (state.slash.open) renderSlash();
+  }
+
+  // ---- connectors and plugins: a read-only look at what the host has ----
+  function openExtras(kind) {
+    extrasPanel.hidden = false;
+    extrasPanel.dataset.kind = kind;
+    extrasTitle.textContent = kind === "connectors" ? "Connectors (MCP servers)" : "Plugins";
+    extrasStatus.textContent = "Reading from Muse…";
+    extrasList.replaceChildren();
+    vscode.postMessage({ type: kind === "connectors" ? "listConnectors" : "listPlugins" });
+  }
+  function closeExtras() {
+    extrasPanel.hidden = true;
+  }
+  function onExtras(msg) {
+    if (extrasPanel.hidden || extrasPanel.dataset.kind !== msg.kind) return;
+    extrasList.replaceChildren();
+    if (msg.error) {
+      extrasStatus.textContent = "Could not read the list: " + msg.error;
+      return;
+    }
+    const rows = msg.rows || [];
+    const noun = msg.kind === "connectors" ? "connector" : "plugin";
+    extrasStatus.textContent = rows.length
+      ? rows.length + " " + noun + (rows.length === 1 ? "" : "s") + ". This is a read-only list; adding, logging in and removing come in a later phase."
+      : "No " + noun + "s are set up in Muse. This is a read-only list; managing them comes in a later phase.";
+    for (const r of rows) {
+      const li = el("li", "session extra-row");
+      const info = el("div", "session-info");
+      info.append(el("div", "session-title", msg.kind === "connectors" ? r.name : r.id));
+      const badges = el("div", "extra-badges");
+      if (msg.kind === "connectors") {
+        info.append(el("div", "session-meta", "from " + r.source));
+        badges.append(el("span", "badge", r.transport), el("span", "badge", r.oauth === "loggedIn" ? "signed in" : r.oauth === "loggedOut" ? "signed out" : "no sign-in"));
+      } else {
+        info.append(el("div", "session-meta", "version " + (r.version || "unknown") + " · " + r.source));
+        badges.append(el("span", "badge", r.enabled ? "enabled" : "disabled"));
+      }
+      li.append(info, badges);
+      extrasList.append(li);
+    }
+  }
+  $("extrasClose").addEventListener("click", closeExtras);
 
   // ---- image attachments: paste, drop, or the attach button ----
   const approxBytes = (b64) => Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
@@ -865,19 +1145,42 @@
     document.body.classList.remove("dragging");
     void addFiles([...ev.dataTransfer.files]);
   });
-  attachBtn.addEventListener("click", () => fileInput.click());
-  fileInput.addEventListener("change", () => {
-    void addFiles([...fileInput.files]);
-    fileInput.value = "";
+  input.addEventListener("input", () => {
+    autosize();
+    state.slash.index = 0;
+    updateSlash();
   });
-  input.addEventListener("input", autosize);
   input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {
+    if (ev.isComposing) return;
+    if (state.slash.open && !slashMenu.hidden) {
+      const rows = slashRows();
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (rows.length) {
+          state.slash.index = (state.slash.index + (ev.key === "ArrowDown" ? 1 : rows.length - 1)) % rows.length;
+          renderSlash();
+        }
+        return;
+      }
+      if ((ev.key === "Enter" || ev.key === "Tab") && !ev.shiftKey && !ev.ctrlKey && rows.length) {
+        ev.preventDefault();
+        pickSkill(rows[Math.min(state.slash.index, rows.length - 1)]);
+        return;
+      }
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        closeSlash();
+        return;
+      }
+    }
+    if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
-      send();
+      // Ctrl+Enter queues while a turn runs; otherwise both keys send (or steer the running turn).
+      send(ev.ctrlKey || ev.metaKey ? "queue" : "steer");
     }
   });
-  sendBtn.addEventListener("click", send);
+  sendBtn.addEventListener("click", () => send("steer"));
+  queueBtn.addEventListener("click", () => send("queue"));
   stopBtn.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
   $("refreshUsage").addEventListener("click", () => vscode.postMessage({ type: "refreshUsage" }));
   $("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));

@@ -200,3 +200,33 @@ select, textarea, input[type="search"] { min-width: 0; max-width: 100%; }
 .icon-btn.busy { opacity: .55; cursor: progress; }
 @keyframes rec-pulse { 50% { box-shadow: 0 0 0 4px rgba(244, 135, 113, .35); } }
 .notice .link { padding: 1px 8px; font-size: 11px; }
+
+/* ---- composer "+" menu, folders, slash palette, queue ---- */
+.menu, .slash-menu { margin: 0 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; }
+.menu[hidden], .slash-menu[hidden], .pending[hidden], .folders[hidden] { display: none; }
+.menu-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 7px 12px; background: none; border: 0; color: var(--fg); text-align: left; cursor: pointer; font: inherit; }
+.menu-item:hover, .menu-item:focus { background: var(--code-bg); outline: none; }
+kbd { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+.slash-menu { max-height: 220px; overflow-y: auto; }
+.slash-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 6px 12px; cursor: pointer; }
+.slash-item.active, .slash-item:hover { background: var(--code-bg); }
+.slash-name { font-family: var(--mono); font-weight: 600; }
+.slash-hint { font-family: var(--mono); color: var(--muted); }
+.slash-desc { flex: 1 1 100%; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slash-empty { padding: 8px 12px; color: var(--muted); font-size: 12px; }
+.folders { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.folder-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 4px 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); font-size: 12px; }
+.folder-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.folder-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 5px; }
+.folder-chip button:hover { color: var(--error); }
+.pending { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pending li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px dashed var(--border); border-radius: 6px; color: var(--muted); font-size: 12px; }
+.pending .pending-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg); }
+.queue-btn { padding: 7px 12px; }
+.grow { flex: 1; }
+.extra-row { cursor: default; }
+.extra-badges { display: flex; flex-wrap: wrap; gap: 4px; flex: none; }
+.extras-note { padding: 0 14px 12px; color: var(--muted); font-size: 12px; }
+@media (max-width: 360px) {
+  .composer .queue-btn { margin-left: auto; }
+}

@@ -18,11 +18,14 @@ export interface FakeReport {
   sessionLists: Record<string, unknown>[];
   resumes: Record<string, unknown>[];
   forks: Record<string, unknown>[];
+  skillLists: Record<string, unknown>[];
+  pluginLists: Record<string, unknown>[];
+  unqueues: Record<string, unknown>[];
 }
 
 /** Reads the report. A missing file or a half-written last line is "not yet": callers poll. */
 export function readReport(path: string): FakeReport {
-  const report: FakeReport = { argv: [], startAttempts: [], startParams: {}, receipts: [], decides: [], interrupts: 0, setModels: [], turnStarts: [], listParams: [], initializes: [], refreshes: 0, sessionLists: [], resumes: [], forks: [] };
+  const report: FakeReport = { argv: [], startAttempts: [], startParams: {}, receipts: [], decides: [], interrupts: 0, setModels: [], turnStarts: [], listParams: [], initializes: [], refreshes: 0, sessionLists: [], resumes: [], forks: [], skillLists: [], pluginLists: [], unqueues: [] };
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -80,6 +83,15 @@ export function readReport(path: string): FakeReport {
         break;
       case "fork":
         report.forks.push(data as Record<string, unknown>);
+        break;
+      case "skill-list":
+        report.skillLists.push(data as Record<string, unknown>);
+        break;
+      case "plugin-list":
+        report.pluginLists.push(data as Record<string, unknown>);
+        break;
+      case "unqueue":
+        report.unqueues.push(data as Record<string, unknown>);
         break;
     }
   }
