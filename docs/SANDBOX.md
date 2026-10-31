@@ -35,8 +35,7 @@ This was observed on the machine this extension was developed on, and the cause 
 
 Things to try, in order (none confirmed to fix it):
 
-1. Start Muse's own terminal app (`muse`) and ask it to run a harmless command such as `echo hi`. If that works and
-   Antares does not, the difference is in how the host is launched, and it is worth reporting.
+1. Start Muse's own terminal app with a **sandboxed** profile: `muse --permission-profile :ask-me`, and ask it to run `echo hi`. Look at the status line at the bottom: **YOLO** (in red) means approval **and the sandbox are off**, so a command working there says nothing about the sandbox. (On the development machine the terminal app ran in YOLO, and `echo hi` worked, both in an editor terminal and in a plain PowerShell.) If it works under `:ask-me` and Antares still fails, the difference is in how the host is launched; if it fails with the same message, the problem is in Muse's sandbox on that machine, and it is theirs to fix.
 2. ~~Launch the editor elevated.~~ **Tested and ruled out:** Antigravity IDE opened as Administrator (the window title showed `[Administrator]`) still showed `sandbox unavailable` in a new chat, with `muse sandbox windows check` reporting ready. Elevation of the parent process is not the cause.
 3. Check that no security software blocks the sandbox users, and that Muse is installed per user as usual.
 4. Report it with the output of `muse sandbox windows check` and the footer text, to the Muse team (it is their host)
