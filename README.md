@@ -11,7 +11,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: phase 0 (spike).** Antares currently verifies that it can talk to your local Muse and shows the Antares panel. There is no chat yet. See the [roadmap](#roadmap).
+> **Status: phase 1 in progress.** Antares verifies that it can talk to your local Muse and shows the Antares panel. There is no chat yet. See the [roadmap](#roadmap).
 
 > **Unofficial.** Antares is an independent community project. It is not made, endorsed or supported by Meta or the Muse Code team. "Muse" and "Muse Code" belong to their owners.
 
@@ -31,7 +31,7 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | MSP client, offline self-test (echo provider), Antares panel with banner | **Done** |
-| 1 (MVP) | Chat with streaming; copy button on every message, code block, shell output and diff; paste text and images; approvals with visible profile and sandbox; model and reasoning-effort picker; token and subscription-usage panel (5 h and weekly windows, with threshold alerts); sessions (list, resume, fork) | Planned |
+| 1 (MVP) | Chat with streaming; copy button on every message, code block, shell output and diff; paste text and images; approvals with visible profile and sandbox; model and reasoning-effort picker; token and subscription-usage panel (5 h and weekly windows, with threshold alerts); sessions (list, resume, fork) | **In progress** (protocol findings so far: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md)) |
 | 2 | Voice input (local Whisper, transcript sent as text), skills (`/`), worktrees | Planned |
 | 3 | MCP servers, plugins, hooks, editor diffs, terminal | Planned |
 | 4 | Video input, polish, Open VSX / Marketplace packaging | Planned |
@@ -76,7 +76,9 @@ src/muse/locate.ts    finds the muse executable
 src/muse/uuidv7.ts    MSP requires UUIDv7 command ids (v4 is refused)
 src/ui/               webview panel and the startup banner
 scripts/spike.ts      runs the self-test from the command line
+scripts/probe-*.ts    protocol probes (one minimal turn; credential state). Run deliberately
 docs/PLAN.md          roadmap, decisions, risks
+docs/PROTOCOL-NOTES.md what has been observed on the wire vs. only read from the schema
 ```
 
 ## Contributing
