@@ -68,6 +68,23 @@ Known limits worth stating up front:
 - Subscription usage is exposed as percentages of the 5 h and weekly windows. There is no monetary figure in the protocol, so Antares will not invent one. The numbers are as of the host's last read, not live: Antares shows the time, reads fresh numbers when a chat opens (`usage/refresh`, no model call, at most once a minute; setting `antares.usage.refreshOnOpen`) and after each message, and never polls. Alerts (default 80% and 95%, setting `antares.usage.alertThresholds`) fire once per window and re-arm when the window resets. The token counter is a local sum of what the host reports for chats run through Antares, not the account total.
 - Part of the protocol is experimental and may change between Muse versions. Antares checks the schema fingerprint at `initialize` and warns when it differs from the versions it was written against.
 
+## Install and first use
+
+Full guide: **[docs/INSTALL.md](docs/INSTALL.md)** (English) · **[docs/INSTALL.pt-BR.md](docs/INSTALL.pt-BR.md)** (Português).
+
+1. **Have Muse Code installed and logged in** (`muse --version`, then `muse login` once). Open your project folder in VS Code or Antigravity IDE.
+2. **Download `antares-0.1.0.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases).
+3. **Install it:** Extensions view, the `...` menu, *Install from VSIX...* (or `code --install-extension antares-0.1.0.vsix`), then *Developer: Reload Window*.
+4. **Open it:** click the Antares icon in the activity bar, or `Ctrl+Shift+P`, then *Antares: Open*. If it says "Muse executable not found", set `antares.musePath`.
+5. **Optional voice:** `Ctrl+Shift+P`, then *Antares: Set up local voice* (about 450 MB, asks first, runs on your computer).
+6. **Use it:** pick a mode next to the model (Plan reads only; Accept edits edits files; Bypass runs commands with no sandbox), use `+` to add files, folders, skills and more, and watch the footer for your subscription usage.
+
+If shell commands fail with "sandbox unavailable", read [docs/SANDBOX.md](docs/SANDBOX.md).
+
+### What is still missing in 0.1.0
+
+Video input, worktrees, voice recording outside Windows, an embedded terminal, adding MCP servers from the UI, publishing to Open VSX and the Marketplace, and verification with real services (connector OAuth, plugins with hooks, the Auto-review reviewer, a real browser server). Each has a reason in [docs/INSTALL.md](docs/INSTALL.md#10-what-is-still-missing-in-010) and in the [roadmap](#roadmap).
+
 ## Requirements
 
 - Muse Code installed and, for later phases, logged in. Phase 0 needs no login.
