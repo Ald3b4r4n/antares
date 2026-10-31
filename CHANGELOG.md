@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.0 — release candidate
+
+Everything below under "Unreleased" is part of this build. In one place:
+
+- **Chat:** streaming, copy buttons, image paste/drop, tool cards, approvals (the host's own choices, shown once), five permission modes (Manual is shown unavailable: Muse has no such profile), model and effort pickers, subscription usage with alerts, session history (continue or fork).
+- **Input:** voice dictation on Windows (faster-whisper or Windows speech, local), "+" menu with files, folders, skills, connectors, plugins and import, steer or queue while a turn runs.
+- **Output:** checklists, file-edit diffs, a Changes view with cumulative diffs, workspace images, Computer Use approval cards, explanations for the sandbox failure.
+- **Manage:** plugin install (folder or marketplace) and marketplaces, connector OAuth sign-in and sign-out, skill import. Each step says what it does and asks first.
+- **Not built or not possible, with reasons:** video input (untestable end to end here), worktrees (the host's git probe times out on the test machine), an embedded terminal (left out on purpose), adding or removing MCP servers (the protocol has no setting), reading a skill's activation, the image a model saw through a tool, model-generated images, voice recording on macOS and Linux.
+- **Known problem on the test machine:** the host reports the Windows sandbox as unavailable although `muse sandbox windows check` says ready; see docs/SANDBOX.md.
+- **Version** bumped from 0.0.1 to 0.1.0.
+
 ## Unreleased — phase 3D (second slice): changes in this chat
 
 - A **Changes (n)** button (next to Usage) lists every file the agent changed in this chat, once, with its number of edits and `+n −m` totals. **Open diff** compares the file before the chat's first edit with now, in VS Code's diff editor; **Open file** opens it. The "before" is rebuilt by undoing the chat's edits from the most recent to the oldest. If a line inside a region an edit touched has changed since, no "before" is invented: the file opens and a note says why. Changes elsewhere in the file are kept (only the chat's edits are undone). Replayed history counts too, in the order the edits happened.

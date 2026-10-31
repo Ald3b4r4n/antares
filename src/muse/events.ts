@@ -377,7 +377,7 @@ export function summarizeArgs(args: unknown): string {
   return clip(typeof args === "string" ? args : (JSON.stringify(args) ?? ""), 200);
 }
 
-const SANDBOX_FIX_WINDOWS = " On Windows, run `muse sandbox windows setup` once from an administrator terminal, after reading what it does; Antares never runs it.";
+const SANDBOX_FIX_WINDOWS = " On Windows, run `muse sandbox windows setup` once from an administrator terminal, after reading what it does; Antares never runs it. If it still fails afterwards, see docs/SANDBOX.md in the Antares repository.";
 const SANDBOX_FIX_OTHER = " See Muse's documentation for setting up its sandbox on this system.";
 
 /**

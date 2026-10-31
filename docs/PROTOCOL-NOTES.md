@@ -194,3 +194,11 @@ Reported after the first use in a real project (a screenshot, no session data wa
 
 - **Contract:** `session/start.worktree` (experimental) is `{mode: "create", baseRef?}` or `{mode: "existing", path}`; the session then carries `worktree: {origin: "created" | "attached", path}` and a `branch`. `worktree/list {workspaceRoot}` answers `{worktrees: [{path, branch?, isMain, sessionIds}]}`. A runtime-owned child worktree has cleanup policy `removeIfClean`.
 - **Observed:** `session/start` with `worktree: {mode: "create"}` answered `-32602` "workspaceRoot '...' names no repository" for the short 8.3 path, the extended-length path and the plain long path alike, in a valid repository (`git worktree list` showed it). `worktree/list` answered `-32603` "worktree/list failed: probe bare Git repository failed: ... timed out after 10s", also for this project's own repository, with or without non-interactive git environment variables. `git rev-parse` in the same folders answers in about 0.15 s from a shell. Cause not found; no worktree was created, and the throwaway repository was removed.
+
+## Observed: video upload (echo provider, no paid call)
+
+`scripts/probe-video.ts` with a 24-byte synthetic file that only has an MP4 `ftyp` box (not a playable video).
+
+- `media/upload` on an **ephemeral** session (`--no-session-log`) answers `-32020` "session ... not found": the video store needs a durable session.
+- On a durable session the host validated the request: a wrong `totalBytes` is refused (`-32602`, "assembled bytes do not match totalBytes") and a media type other than `video/mp4` or `video/quicktime` is refused (`-32602`). A turn naming an upload that was never completed is refused with `-32038`.
+- The finalize of my synthetic file failed with `-32603` ("media/upload finalize failed"), cause unknown (probably content validation). So a successful upload and the shape of a user message with a video were **not observed**, and no video was sent to a model.
