@@ -286,6 +286,36 @@ try {
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before this chat/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
     await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
 
+    // Scrolling: the view follows growing output, stops when the user scrolls up, and offers a button back down.
+    const postMsgs = (from, to) => evalWeb(`(() => { for (let i = ${from}; i < ${to}; i++) w.postMessage({ type: 'event', event: { type: 'assistantCompleted', itemId: 'scroll-' + i, text: 'Scroll line ' + i + '\\n\\nMore text so each message is a few lines tall, number ' + i + '.' } }, '*'); return true; })()`);
+    const scrollState = () => evalWeb("(() => { const m = d.getElementById('messages'); return { gap: m.scrollHeight - m.scrollTop - m.clientHeight, top: m.scrollTop, tall: m.scrollHeight > m.clientHeight + 200, jump: !d.getElementById('jumpBottom').hidden }; })()");
+    await postMsgs(0, 30);
+    await sleep(700);
+    const following = await scrollState();
+    check("while following, new output keeps the latest message in view and there is no jump button", following.tall && following.gap < 5 && !following.jump, JSON.stringify(following));
+    await evalWeb("(() => { const m = d.getElementById('messages'); m.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -200, bubbles: true })); m.scrollTop = 0; m.dispatchEvent(new w.Event('scroll')); return true; })()");
+    await sleep(200);
+    await postMsgs(30, 40);
+    await sleep(700);
+    const reading = await scrollState();
+    check("after the user scrolls up, new output does not move the view, and the jump-to-latest button appears", reading.top < 30 && reading.jump, JSON.stringify(reading));
+    await shot("36-jump-to-latest");
+    await evalWeb("(() => { d.getElementById('jumpBottom').click(); return true; })()");
+    await sleep(500);
+    const back = await scrollState();
+    check("the button returns to the latest message, hides, and following resumes", back.gap < 5 && !back.jump, JSON.stringify(back));
+    await postMsgs(40, 43);
+    await sleep(500);
+    check("following resumed: output after the jump stays in view", (await scrollState()).gap < 5);
+
+    // The copy button: none on an assistant message in the middle of work, one under the last message once the turn ends.
+    const copyState = await evalWeb("({ assistantHeadCopies: d.querySelectorAll('.msg.assistant .msg-head .copy').length, foot: d.querySelectorAll('.msg.assistant .msg-foot .copy').length })");
+    check("an assistant message has no copy button in its header, and none under it while no turn has finished", copyState.assistantHeadCopies === 0 && copyState.foot === 0, JSON.stringify(copyState));
+    await evalWeb("(() => { w.postMessage({ type: 'event', event: { type: 'turnStarted', turnId: 'tt1' } }, '*'); w.postMessage({ type: 'event', event: { type: 'assistantCompleted', itemId: 'final-answer', text: 'The final answer.' } }, '*'); w.postMessage({ type: 'event', event: { type: 'turnCompleted', turnId: 'tt1', terminal: 'completed', durationMs: 1000 } }, '*'); return true; })()");
+    await waitFor("the copy button under the final answer", () => evalWeb("!!d.querySelector('.msg-foot .copy')"), 10000);
+    const finalCopy = await evalWeb("({ foot: d.querySelectorAll('.msg.assistant .msg-foot .copy').length, onLast: [...d.querySelectorAll('.msg.assistant')].pop().querySelector('.msg-foot .copy') !== null })");
+    check("when the turn ends, one copy button appears under its last message", finalCopy.foot === 1 && finalCopy.onLast, JSON.stringify(finalCopy));
+
     // Browser and Computer Use approvals: a synthetic request through the real page and CSP. The window title is
     // hostile on purpose (markup in the page's own words must stay text), and the host is not plain ASCII.
     await evalWeb(`(() => { w.postMessage({ type: 'event', event: { type: 'approvalRequested', approvalId: 'cua-1', itemId: 'i-cua', toolName: 'browser_click',

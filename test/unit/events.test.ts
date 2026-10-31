@@ -2,7 +2,7 @@
 // approval shapes come from the exported schema (no real approval request has been seen yet).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { failureHint, mapApprovalRequest, mapCua, mapNotification, sandboxNote, subjectView, summarizeArgs, toolArgLines } from "../../src/muse/events.ts";
+import { failureHint, mapApprovalRequest, mapCua, mapNotification, sandboxNote, shellOutputText, subjectView, summarizeArgs, toolArgLines } from "../../src/muse/events.ts";
 
 const requirementId = { approvalId: "ap-1", sourceIndex: 2 };
 const base = {
@@ -196,4 +196,19 @@ test("sandbox failure: the tool call offers the switch to Bypass, and says what 
   const other = mapNotification("item/completed", { item: { itemId: "o", kind: "toolCall", tool: "powershell", args: '{"command":"x"}', status: "failed", failureReason: "exit code 1" } });
   if (other?.type === "toolCall") assert.equal("hintAction" in other, false, "no offer for an ordinary failure");
   assert.match(sandboxNote("unavailable", "win32") ?? "", /Bypass permissions/);
+});
+
+test("shell output: a failed command keeps its own output, shown as text with the exit code", () => {
+  const record = (extra: object) => JSON.stringify({ chunk_id: "exec-1-1", command: "python -m unittest", description: "tests", exit_code: 1, terminal_status: "completed", output: "FAIL: test_a\r\nAssertionError\r\n", original_output_bytes: 30, truncated: false, ...extra });
+  assert.equal(shellOutputText(record({})), "exit code 1\nFAIL: test_a\nAssertionError");
+  assert.equal(shellOutputText(record({ exit_code: 0, output: "ok\r\n" })), "ok", "no exit-code line for a success");
+  assert.equal(shellOutputText(record({ truncated: true })), "exit code 1\nFAIL: test_a\nAssertionError\n[the host cut the output here]");
+  assert.equal(shellOutputText(record({ output: "" })), "exit code 1, no output");
+  assert.equal(shellOutputText("plain text"), "plain text", "another shape is shown as it came");
+  const e = mapNotification("item/completed", { item: { itemId: "p", kind: "toolCall", tool: "powershell", args: '{"command":"python -m unittest"}', status: "failed", failureReason: "process exited with status 1", visibleOutput: record({}) } });
+  assert.equal(e?.type, "toolCall");
+  if (e?.type === "toolCall") {
+    assert.equal(e.failure, "process exited with status 1");
+    assert.equal(e.output, "exit code 1\nFAIL: test_a\nAssertionError");
+  }
 });

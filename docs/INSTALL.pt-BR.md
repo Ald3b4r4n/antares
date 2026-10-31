@@ -81,6 +81,8 @@ Trocar de modo mantém a conversa. Qualquer coisa acima de Plan pede confirmaç�
 
 **Enquanto o Muse trabalha:** `Enter` orienta o turno em andamento; `Ctrl+Enter` enfileira a mensagem.
 
+**Acompanhar a saída:** a tela desce conforme o Muse escreve. Role para cima para ler algo e ela para; clique no botão redondo com a seta, acima da caixa de mensagem, para voltar à última mensagem. O botão **Copy** da resposta aparece sob a última mensagem quando a tarefa termina.
+
 **O que o Muse mudou:** edições de arquivo mostram um diff no cartão da ferramenta, e o botão **Changes** lista todos os arquivos alterados com um diff por arquivo.
 
 **Aprovações:** cada uma mostra exatamente o que está sendo pedido, com as escolhas do próprio Muse. A Antares nunca decide por você.

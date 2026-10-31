@@ -15,6 +15,10 @@ Everything below under "Unreleased" is part of this build. In one place:
 - **"+" menu additions:** *Add current file* (an @mention), *Add selection* (a quoted block naming the file and lines, capped at 20,000 characters) and files dragged from the Explorer (they carry only their addresses).
 - **Voice language:** after each dictation Antares shows which language the engine heard, and the docs explain that `auto` guesses per clip (set `antares.voice.language`, and consider the `small` model).
 - **Mode switch wording:** a chat with no messages yet no longer says "Start new chat" in the switch dialog; it says the new mode simply applies.
+- **Follows the output, like other assistants:** the view scrolls down as text, tool cards and images arrive. Scrolling up (wheel, keys or the scrollbar) stops it, a round arrow button appears above the message box, and clicking it (or scrolling to the bottom) goes back to the latest message and follows again.
+- **Copy at the end:** an assistant message no longer has a copy button while the agent works; one appears under the last message of the turn when it finishes. Code blocks keep their own copy button; your own messages keep theirs.
+- **Failed commands show their output:** a shell call that exits with a non-zero status used to show only "process exited with status 1". It now shows the command's own output as text with the exit code (and a note when the host cut it).
+- **Bypass footer:** the footer no longer shows a warning-coloured "sandbox unavailable" in Bypass, where the sandbox is not used; it says "not used (Bypass)".
 - **Version** bumped from 0.0.1 to 0.1.0.
 
 ## Unreleased — phase 3D (second slice): changes in this chat

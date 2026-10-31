@@ -27,6 +27,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <button id="newChat" class="link">New chat</button>
   </span>
 </header>
+<button id="jumpBottom" class="jump-bottom" hidden title="Scroll to the latest message" aria-label="Scroll to the latest message">\u2193</button>
 <div id="messages">
   <div class="hero"><img src="${mediaUri("antares.svg")}" alt="">
     <div><pre class="logo">${escapeHtml(ANTARES_ASCII)}</pre><p class="tag">${escapeHtml(ANTARES_TAGLINE)}</p></div></div>

@@ -447,6 +447,28 @@ function toolDetails(tool: string, args: Obj | undefined, item: Obj): { summary?
   return { extra: {} };
 }
 
+/**
+ * A shell call's visible output is a JSON record (observed: chunk_id, command, description, exit_code,
+ * terminal_status, output, truncated). Show what a person wants: the command's own output, with the exit code when it
+ * is not 0 and a note when the host cut it. Any other shape is shown as it came.
+ */
+export function shellOutputText(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isObj(parsed) && typeof parsed.output === "string") {
+      const code = num(parsed.exit_code);
+      const head = code !== undefined && code !== 0 ? `exit code ${code}\n` : "";
+      const tail = parsed.truncated === true ? "\n[the host cut the output here]" : "";
+      const body = parsed.output.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+      if (body === "") return code !== undefined && code !== 0 ? `exit code ${code}, no output` : "no output";
+      return `${head}${body}${tail}`;
+    }
+  } catch {
+    /* not JSON */
+  }
+  return raw;
+}
+
 function mapToolCall(item: Obj, itemId: string): ChatEvent {
   const failure = str(item.failureReason);
   const output = str(item.visibleOutput);
@@ -463,7 +485,9 @@ function mapToolCall(item: Obj, itemId: string): ChatEvent {
     failure: failure ? clip(failure, 600) : undefined,
     hint: failureHint(failure),
     ...(isSandboxFailure(failure) ? { hintAction: "bypass" as const } : {}),
-    output: output && !failure ? clip(output, 600) : undefined,
+    // A failed call keeps its output (a command that exits with status 1 says why there), except the host's
+    // boilerplate "tool failed: ..." that only repeats the failure.
+    output: output && !(failure && /^tool failed:/i.test(output)) ? clip(tool === "powershell" ? shellOutputText(output) : output, 1500) : undefined,
     ...details.extra,
   };
 }

@@ -81,6 +81,8 @@ Changing mode keeps the conversation. Anything above Plan asks you to confirm fi
 
 **While Muse works:** `Enter` steers the running turn; `Ctrl+Enter` queues the message.
 
+**Following the output:** the view scrolls as Muse writes. Scroll up to read something and it stops; click the round arrow button above the message box to jump back to the latest message. The **Copy** button for the answer appears under the last message when the task finishes.
+
 **What Muse changed:** file edits show a diff on the tool card, and the **Changes** button lists every changed file with one diff per file.
 
 **Approvals:** each one shows exactly what is asked, with Muse's own choices. Antares never decides for you.

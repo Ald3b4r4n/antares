@@ -74,6 +74,7 @@
     modeId: undefined,
     sandbox: undefined,
     sandboxNote: undefined, // set when the host cannot enforce its sandbox
+    lastAssistant: undefined, // item id of the latest assistant message: it gets the copy button when the turn ends
     bypassOffered: false, // the notice that offers Bypass is shown once per chat
   };
 
@@ -121,28 +122,89 @@
   }
 
   // ---- message elements ----
+  // The view follows the output as it grows, like other assistants' chats, until the user scrolls up to read something;
+  // then it stays where they are and a button offers the way back to the latest message.
+  const jump = $("jumpBottom");
+  let follow = true;
+  const atBottom = () => messages.scrollHeight - messages.scrollTop - messages.clientHeight < 40;
   function pinned() {
-    return messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
+    return follow;
   }
   function scrollDown() {
     messages.scrollTop = messages.scrollHeight;
   }
+  function setFollow(on) {
+    follow = on;
+    jump.hidden = on;
+  }
+  // Only a move UP leaves the bottom: growing content or our own scrolling never lowers scrollTop, whereas a drag of the
+  // scrollbar, the wheel or the keys do. Reaching the bottom again (by any means) resumes following.
+  let lastTop = 0;
+  messages.addEventListener("scroll", () => {
+    const up = messages.scrollTop < lastTop - 2;
+    lastTop = messages.scrollTop;
+    if (up) setFollow(false);
+    else if (atBottom()) setFollow(true);
+  });
+  messages.addEventListener("wheel", (ev) => {
+    if (ev.deltaY < 0) setFollow(false); // reading upwards: stop following before the next token arrives
+  }, { passive: true });
+  messages.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowUp" || ev.key === "PageUp" || ev.key === "Home") setFollow(false);
+  });
+  jump.addEventListener("click", () => {
+    setFollow(true);
+    scrollDown();
+  });
+  // Anything that makes the conversation taller (a streamed token, a tool card filling in, an image loading) keeps the
+  // latest output in view while following.
+  let scrollQueued = false;
+  new MutationObserver(() => {
+    if (!follow || scrollQueued) return;
+    scrollQueued = true;
+    requestAnimationFrame(() => {
+      scrollQueued = false;
+      if (follow) scrollDown();
+    });
+  }).observe(messages, { childList: true, subtree: true, characterData: true });
+  // The button sits just above the composer, wherever the footer's height ends up.
+  const footerEl = document.querySelector("footer");
+  const placeJump = () => {
+    jump.style.bottom = (footerEl ? footerEl.offsetHeight : 120) + 12 + "px";
+  };
+  if (typeof ResizeObserver === "function" && footerEl) new ResizeObserver(placeJump).observe(footerEl);
+  placeJump();
   function append(node) {
-    const stick = pinned();
     messages.appendChild(node);
-    if (stick) scrollDown();
+    if (follow) scrollDown();
   }
   function addMessage(itemId, role, text, streaming, thumbs) {
     const node = el("div", "msg " + role + (streaming ? " streaming" : ""));
+    // A user message has its copy button in the header. An assistant message has none while the agent works: the
+    // button appears once, under the last message of the finished turn (see addTurnCopy).
     node.innerHTML =
       '<div class="msg-head"><span class="who">' + (role === "user" ? "You" : "Muse") + "</span>" +
-      '<button class="copy" data-copy="message" title="Copy message">' + COPY_ICON + '<span class="label">Copy</span></button></div>' +
+      (role === "user" ? '<button class="copy" data-copy="message" title="Copy message">' + COPY_ICON + '<span class="label">Copy</span></button>' : "") + "</div>" +
       '<div class="body"></div>';
+    if (role === "assistant") state.lastAssistant = itemId;
     const item = { el: node, text, role, raf: 0, thumbs: thumbs || [] };
     state.items.set(itemId, item);
     paint(item);
     append(node);
     return item;
+  }
+  // The copy button for the agent's answer, at the end, once the turn is over.
+  function addTurnCopy() {
+    const item = state.items.get(state.lastAssistant);
+    if (!item || item.el.querySelector(".msg-foot")) return;
+    const foot = el("div", "msg-foot");
+    const btn = el("button", "copy visible");
+    btn.dataset.copy = "message";
+    btn.title = "Copy the answer";
+    btn.innerHTML = COPY_ICON + '<span class="label">Copy</span>';
+    foot.append(btn);
+    item.el.append(foot);
+    if (follow) scrollDown();
   }
   function paint(item) {
     const body = item.el.querySelector(".body");
@@ -532,7 +594,11 @@
       const risky = state.profileId !== ":read-only";
       const sandboxBad = state.sandbox && state.sandbox !== "available";
       parts.push('<span class="' + (risky ? "warn" : "") + '">' + escapeHtml(state.profileId) + "</span>");
-      if (state.sandbox) parts.push('<span class="' + (sandboxBad && risky ? "warn" : "") + '" title="Reported by the Muse host at startup">sandbox ' + escapeHtml(state.sandbox) + "</span>");
+      if (state.sandbox) {
+        // In Bypass the sandbox is not used at all, so its availability is not worth a warning colour.
+        const unused = state.profileId === ":unrestricted";
+        parts.push('<span class="' + (sandboxBad && risky && !unused ? "warn" : "") + '" title="Reported by the Muse host at startup' + (unused ? "; Bypass does not use it" : "") + '">sandbox ' + escapeHtml(unused && sandboxBad ? "not used (Bypass)" : state.sandbox) + "</span>");
+      }
     }
     const model = currentModel();
     if (model) parts.push("<span>" + escapeHtml(model.label) + (state.effort ? " · " + escapeHtml(state.effort) : "") + "</span>");
@@ -777,6 +843,7 @@
           addNotice(e.terminal === "cancelled" || e.terminal === "interrupted" ? "info" : "error", text);
         }
         for (const item of state.items.values()) item.el.classList.remove("streaming");
+        addTurnCopy();
         closePendingApprovals();
         state.background.clear();
         setRunning(false, "Ready");
@@ -825,6 +892,7 @@
       case "history":
         // A stored conversation is redrawn without touching the running/ready state.
         for (const past of e.events) onEvent(past);
+        addTurnCopy();
         if (e.note) addNotice("info", e.note);
         else if (e.events.length === 0) addNotice("info", "This session has no earlier messages to show.");
         break;
@@ -864,6 +932,8 @@
       closeMenus();
       state.pending.clear();
       state.toolEvents.clear();
+      state.lastAssistant = undefined;
+      setFollow(true);
       state.bypassOffered = false;
       state.patches.clear();
       state.changes = [];
