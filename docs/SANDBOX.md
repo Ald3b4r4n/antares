@@ -55,6 +55,8 @@ Also for `muse serve`: `initialize` reports `sandboxAvailability: "unavailable"`
 
 So the sandbox itself works on that machine; the stdio host does not manage to use it. This looks like a defect or an undocumented condition in `muse serve` on Windows, not something Antares or a missing setup causes. **Please report it to the Muse team** with the table above. If you find what makes `serve` see the sandbox (an environment variable, a setting), please open an issue on the Antares repository so this page can say it.
 
+Tried as a workaround and **rejected**: starting the host with `--disable-sandbox` under `:ask-me`. The shell command then ran with **no approval request at all** (0 approvals), so it is no safer than Bypass permissions, only less honest about it. Antares does not offer it.
+
 Until it is fixed: Antares shows the problem in the footer and on the failed call, Plan and Accept edits still read and edit, and commands can be run in the editor's own terminal.
 
 ## Working without it
