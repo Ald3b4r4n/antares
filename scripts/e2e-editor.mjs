@@ -12,6 +12,9 @@ import { join, resolve } from "node:path";
 
 const exe = process.argv[2];
 const REAL = process.env.E2E_REAL === "1";
+// Voice mode: fake (no microphone, no engine), error (engine not set up: the setup offer), real (the real
+// microphone and the real faster-whisper from ANTARES_VOICE_HOME; records about 2.5 s and keeps nothing).
+const VOICE = process.env.E2E_VOICE ?? "fake";
 const label = process.argv[3] ?? "editor";
 if (!exe) {
   console.error("usage: node scripts/e2e-editor.mjs <editor-exe> [label]");
@@ -32,7 +35,7 @@ writeFileSync(
   join(userData, "User", "settings.json"),
   JSON.stringify({ "workbench.startupEditor": "none", "security.workspace.trust.enabled": false, "telemetry.telemetryLevel": "off", "update.mode": "none", "extensions.autoCheckUpdates": false, "workbench.tips.enabled": false, "window.restoreWindows": "none", "workbench.colorTheme": "Default Dark Modern", "chat.disableAIFeatures": true, "window.dialogStyle": "custom", "workbench.secondarySideBar.defaultVisibility": "hidden" }, null, 2),
 );
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false }, null, 2));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 
 const child = spawn(
@@ -285,6 +288,56 @@ try {
   await sleep(700);
   const copied = await evalWeb(`d.querySelector('.msg.assistant .copy').className + '|' + d.querySelector('.msg.assistant .copy .label').textContent`);
   check("copy button confirms ('Copied') after the extension host wrote the clipboard", /done/.test(copied) && /Copied/.test(copied), copied);
+
+  // Microphone: informational (it depends on the machine and the editor's permission policy). Records
+  // what a webview can do today, which decides how voice input must be built.
+  const mic = await evalWeb(`(async () => {
+    const md = w.navigator.mediaDevices;
+    const out = { hasMediaDevices: !!md, hasGetUserMedia: !!(md && md.getUserMedia), secure: w.isSecureContext, hasMediaRecorder: typeof w.MediaRecorder === 'function', hasAudioContext: typeof w.AudioContext === 'function', hasWorklet: typeof w.AudioWorkletNode === 'function' };
+    try { out.devices = md ? (await md.enumerateDevices()).filter(x => x.kind === 'audioinput').length : null; } catch (e) { out.devices = 'error ' + e.name; }
+    try { const s = await md.getUserMedia({ audio: true }); out.getUserMedia = 'granted'; s.getTracks().forEach(t => t.stop()); } catch (e) { out.getUserMedia = e.name + ': ' + String(e.message).slice(0, 80); }
+    try { out.permissionState = (await w.navigator.permissions.query({ name: 'microphone' })).state; } catch (e) { out.permissionState = 'n/a ' + e.name; }
+    out.iframeAllow = (document.querySelector('iframe')?.getAttribute('allow')) ?? null;
+    return out;
+  })()`).catch((e) => ({ error: e.message }));
+  console.log(`MIC[${label}]:`, JSON.stringify(mic));
+
+  // Voice dictation through the real extension host. The page cannot use the microphone, so the host records.
+  const micState = () => evalWeb("({ recording: d.getElementById('mic').classList.contains('recording'), busy: d.getElementById('mic').classList.contains('busy'), status: d.getElementById('voiceStatus').hidden ? '' : d.getElementById('voiceStatus').textContent, input: d.getElementById('input').value, notices: [...d.querySelectorAll('.notice')].map(n => n.textContent), setupButton: !!d.querySelector('.notice .link') })");
+  const clickMic = () => evalWeb("(() => { d.getElementById('mic').click(); return true; })()");
+  if (VOICE === "fake") {
+    await clickMic();
+    await waitFor("the recording state", async () => (await micState()).recording, 10000);
+    const rec = await micState();
+    check("the microphone button shows a recording state with a timer", /Recording 0:0\d/.test(rec.status), rec.status);
+    await shot("14-voice-recording");
+    await sleep(700);
+    await clickMic();
+    await waitFor("the dictated text", async () => (await micState()).input.includes("texto ditado de teste"), 15000);
+    const done = await micState();
+    check("the dictated text lands in the box for review (it is not sent)", done.input.trim() === "texto ditado de teste" && !done.recording && !done.busy, JSON.stringify({ input: done.input, recording: done.recording }));
+    await evalWeb("(() => { const i = d.getElementById('input'); i.value = ''; return true; })()");
+  } else if (VOICE === "error") {
+    await clickMic();
+    await waitFor("the voice notice", async () => (await micState()).notices.some((n) => /voice|engine/i.test(n)), 15000);
+    const err = await micState();
+    check("with no engine set up, a clear message with a setup button appears and nothing is recorded", err.setupButton && !err.recording && err.notices.some((n) => /faster-whisper/.test(n)), JSON.stringify(err.notices.filter((n) => /voice|engine/i.test(n)).map((n) => n.slice(0, 110))));
+    await shot("14-voice-needs-setup");
+  } else if (VOICE === "real") {
+    await clickMic();
+    await waitFor("the real recording state", async () => (await micState()).recording, 30000);
+    await shot("14-voice-real-recording");
+    await sleep(2500);
+    await clickMic();
+    await waitFor("the transcription to finish", async () => { const m = await micState(); return !m.recording && !m.busy; }, 120000);
+    const real = await micState();
+    const speech = real.input.trim().length;
+    const errs = real.notices.filter((n) => /speech|transcri|record|engine|voice/i.test(n));
+    console.log("VOICE-REAL:", JSON.stringify({ insertedChars: speech, notices: errs.map((n) => n.slice(0, 120)) }));
+    check("the real microphone and local Whisper ran inside the editor; the result is text or 'no speech', never a crash", speech > 0 || errs.some((n) => /No speech was recognized/.test(n)), JSON.stringify({ insertedChars: speech, notices: errs.length }));
+    check("no engine or recorder error was shown", !errs.some((n) => /failed|could not|Python|Traceback|stopped/i.test(n)), JSON.stringify(errs.map((n) => n.slice(0, 100))));
+    await evalWeb("(() => { const i = d.getElementById('input'); i.value = ''; return true; })()");
+  }
 
   // Model/profile/history UI.
   await evalWeb(`(() => { d.getElementById('historyBtn').click(); return true; })()`);

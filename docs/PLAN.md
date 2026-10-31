@@ -19,14 +19,16 @@ Chat com streaming, copiar/colar, imagens (colar, soltar, anexar), perfil por ch
 
 ## Fase 2: entrada e controle do chat
 
-### 2A. Voz (em andamento)
+### 2A. Voz (pronta no Windows; detalhes em [VOICE.md](VOICE.md))
 
 | Item | Origem | Estado |
 |---|---|---|
-| Botão de microfone no compositor, gravar e parar | cliente | a verificar: o webview do editor pode negar o microfone |
-| Transcrição local com Whisper; o texto cai no campo para revisar antes de enviar | cliente | a verificar: runtime e modelo |
-| Escolha do tamanho do modelo (a máquina tem pouca RAM livre) | cliente | planejado |
-| Nada é enviado a serviços externos; o áudio não é gravado em disco além do necessário e é apagado | cliente | princípio |
+| Botão de microfone no compositor, gravar e parar | cliente | **pronto**. O webview **nega** o microfone (medido no VS Code e no Antigravity IDE), então a gravação é feita pelo host da extensão (waveIn, 16 kHz, 16 bits) |
+| Transcrição local; o texto cai no campo para revisar antes de enviar | cliente | **pronto**: faster-whisper (recomendado, instalação opcional com consentimento) e fala do Windows (precisa de reconhecedor instalado; não há nenhum nesta máquina) |
+| Escolha do tamanho do modelo | cliente | **pronto** (`tiny`/`base`/`small`, padrão `base`) |
+| Nada é enviado a serviços externos; o áudio é temporário e apagado | cliente | **pronto** (verificado nos testes) |
+| Gravação em macOS e Linux | cliente | **pendente** (só o lado Whisper é multiplataforma) |
+| Teste na janela real | cliente | **feito** no VS Code 1.143.1 e no Antigravity IDE 1.107.0 (falso, erro e microfone/Whisper reais) |
 
 ### 2B. Menu "+" do compositor (inspirado na segunda captura)
 

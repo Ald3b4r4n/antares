@@ -19,6 +19,8 @@
   const historyAll = $("historyAll");
   const attachBtn = $("attach");
   const fileInput = $("file");
+  const micBtn = $("mic");
+  const voiceStatus = $("voiceStatus");
 
   // Antares' own conservative limits (the host's are not published); the extension re-checks them.
   const IMAGE = { allowed: ["image/png", "image/jpeg", "image/gif", "image/webp"], max: 6, maxBytes: 5 * 1024 * 1024, maxTotal: 15 * 1024 * 1024, maxSide: 2048 };
@@ -535,6 +537,9 @@
     if (msg.type === "event") onEvent(msg.event);
     else if (msg.type === "config") applyConfig(msg);
     else if (msg.type === "sessions") showSessions(msg);
+    else if (msg.type === "voice") onVoiceState(msg);
+    else if (msg.type === "voiceResult") onVoiceResult(msg);
+    else if (msg.type === "voiceError") onVoiceError(msg);
     else if (msg.type === "reset") {
       closeHistory();
       for (const node of messages.querySelectorAll(".msg, .notice, .tool, .approval")) node.remove();
@@ -668,6 +673,59 @@
   historyAll.addEventListener("change", renderSessions);
   window.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && !historyPanel.hidden) closeHistory();
+  });
+
+  // ---- voice dictation. The extension host records (the editor denies the webview the microphone) and
+  // transcribes locally; the page only shows the state and receives the text. ----
+  let voiceTimer;
+  const engineName = (id) => (id === "windows" ? "Windows speech" : "faster-whisper");
+  function onVoiceState(msg) {
+    clearInterval(voiceTimer);
+    micBtn.classList.toggle("recording", msg.state === "recording");
+    micBtn.classList.toggle("busy", msg.state === "transcribing");
+    micBtn.setAttribute("aria-pressed", String(msg.state === "recording"));
+    if (msg.state === "recording") {
+      const tick = () => {
+        const s = Math.floor((Date.now() - (msg.startedAt || Date.now())) / 1000);
+        voiceStatus.textContent = "Recording " + Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + " (" + engineName(msg.engine) + "). Click the microphone to stop, Esc to cancel.";
+      };
+      tick();
+      voiceTimer = setInterval(tick, 500);
+      voiceStatus.hidden = false;
+    } else if (msg.state === "transcribing") {
+      voiceStatus.textContent = "Transcribing on your computer (" + engineName(msg.engine) + ")…";
+      voiceStatus.hidden = false;
+    } else {
+      voiceStatus.hidden = true;
+      voiceStatus.textContent = "";
+    }
+  }
+  function onVoiceResult(msg) {
+    const start = input.selectionStart == null ? input.value.length : input.selectionStart;
+    const end = input.selectionEnd == null ? start : input.selectionEnd;
+    const before = input.value.slice(0, start);
+    const after = input.value.slice(end);
+    const sep = before && !/\s$/.test(before) ? " " : "";
+    input.value = before + sep + msg.text + after;
+    const caret = (before + sep + msg.text).length;
+    input.setSelectionRange(caret, caret);
+    autosize();
+    input.focus();
+    if (msg.note) addNotice("info", msg.note);
+  }
+  function onVoiceError(msg) {
+    const node = el("div", "notice warning", msg.message);
+    if (msg.canSetup) {
+      const b = el("button", "link", "Set up local voice");
+      b.style.marginLeft = "10px";
+      b.addEventListener("click", () => vscode.postMessage({ type: "voice", action: "setup" }));
+      node.append(b);
+    }
+    append(node);
+  }
+  micBtn.addEventListener("click", () => vscode.postMessage({ type: "voice", action: "toggle" }));
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && micBtn.classList.contains("recording")) vscode.postMessage({ type: "voice", action: "cancel" });
   });
 
   // ---- composer ----

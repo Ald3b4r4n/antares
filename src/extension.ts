@@ -6,6 +6,7 @@ import { locateMuse } from "./muse/locate.ts";
 import { runSelfTest } from "./muse/selftest.ts";
 import { ChatPanel } from "./ui/chatPanel.ts";
 import { UsageTracker } from "./ui/usageTracker.ts";
+import { setupVoice } from "./ui/voiceBridge.ts";
 
 export interface AntaresApi {
   chat(): ChatPanel | undefined;
@@ -57,6 +58,7 @@ ${tracker.summary()}`, "Refresh usage", "Open Antares");
       if (choice === "Open Antares") await vscode.commands.executeCommand("antares.open");
     }),
     vscode.commands.registerCommand("antares.selfTest", selfTest),
+    vscode.commands.registerCommand("antares.setupVoice", () => setupVoice(context)),
   );
   return { chat: () => ChatPanel.get(), usage: () => tracker };
 }

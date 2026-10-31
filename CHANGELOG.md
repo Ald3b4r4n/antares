@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — phase 2A: voice input
+
+- Microphone button in the composer. The recognized text is inserted at the caret for review; nothing is sent automatically. `Esc` cancels a recording.
+- Two local engines: faster-whisper (recommended; private Python environment, Whisper model, offline after setup, worker stopped when idle) and Windows speech recognition (needs an installed desktop recognizer; reported as unavailable otherwise). `antares.voice.engine: auto` prefers faster-whisper and never silently swaps a named engine.
+- Command `Antares: Set up local voice`: shows what will be downloaded and where, asks for consent, lets you pick the folder, installs `faster-whisper==1.2.1` (with `av>=11,<19`), downloads the model and verifies it by transcribing a silent clip offline. Settings `antares.voice.*`.
+- Recording happens in the extension host (Windows `waveIn`, 16 kHz mono 16-bit), because the webviews of VS Code and Antigravity IDE deny the microphone (measured). The temporary WAV is deleted after use.
+- Fix found while testing: an MCI-based capture delivered 8-bit audio on the test device, and a blocking stdin read limited every recording to 400 ms; both replaced.
+- Checked: unit tests (97 in total), synthesized-speech self-test with the real engine (pt 18 %, en 14 % word error rate), and real-window checks in VS Code 1.143.1 and Antigravity IDE 1.107.0 (fake recorder, missing engine, and real microphone with real Whisper). See `docs/VOICE.md`.
+- Not done: recording on macOS and Linux; Windows speech could not be tried end to end here (no recognizer installed).
+
 ## Unreleased — phase 1 (in progress)
 
 - Chat panel with streaming: assistant text arrives as it is generated; Stop interrupts the turn; New chat restarts the session.

@@ -54,10 +54,14 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <button id="refreshUsage" class="link tiny" title="Read fresh subscription usage from Muse (no model call; at most one read per minute)">↻ Usage</button>
   </div>
   <div id="attachments" class="attachments" hidden></div>
+  <div id="voiceStatus" class="voice-status" role="status" aria-live="polite" hidden></div>
   <input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
   <div class="composer">
     <button id="attach" class="icon-btn" title="Attach an image (you can also paste or drop one)" aria-label="Attach an image">
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><circle cx="5.5" cy="6" r="1.2" fill="currentColor"/><path d="M2 12l3.5-3.5 2.5 2.5 2.5-3L14 12" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="mic" class="icon-btn" title="Dictate: records from your microphone and turns it into text on your computer. The text lands in the box for you to review." aria-label="Dictate">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2M5.5 14.5h5" fill="none" stroke="currentColor" stroke-linecap="round"/></svg>
     </button>
     <textarea id="input" rows="1" placeholder="Message Muse…" aria-label="Message"></textarea>
     <button id="send" class="primary">Send</button>

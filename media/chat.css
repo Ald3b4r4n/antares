@@ -193,3 +193,10 @@ select, textarea, input[type="search"] { min-width: 0; max-width: 100%; }
   .tool-head { flex-wrap: wrap; }
   .tool-summary { white-space: normal; overflow-wrap: anywhere; }
 }
+
+/* ---- voice ---- */
+.voice-status { font-size: 11px; color: var(--muted); margin: 0 0 6px; }
+.icon-btn.recording { color: #fff; background: var(--error); border-color: var(--error); animation: rec-pulse 1.2s ease-in-out infinite; }
+.icon-btn.busy { opacity: .55; cursor: progress; }
+@keyframes rec-pulse { 50% { box-shadow: 0 0 0 4px rgba(244, 135, 113, .35); } }
+.notice .link { padding: 1px 8px; font-size: 11px; }

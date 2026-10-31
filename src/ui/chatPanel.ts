@@ -6,6 +6,7 @@ import { locateMuse } from "../muse/locate.ts";
 import { MuseSession, READ_ONLY } from "../muse/session.ts";
 import { chatHtml } from "./chatHtml.ts";
 import type { UsageTracker } from "./usageTracker.ts";
+import { VoiceBridge } from "./voiceBridge.ts";
 
 type FromWebview =
   | { type: "ready" }
@@ -14,6 +15,7 @@ type FromWebview =
   | { type: "newChat" }
   | { type: "setProfile"; profileId: string }
   | { type: "refreshUsage" }
+  | { type: "voice"; action: "toggle" | "cancel" | "setup" }
   | { type: "listSessions" }
   | { type: "openSession"; sessionId: string; mode: "resume" | "fork" }
   | { type: "setModel"; modelId: string }
@@ -28,6 +30,7 @@ export interface TestState {
   events: ChatEvent[];
   rendered?: { messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
   sessionLists: number;
+  voice: { type: string; [k: string]: unknown }[];
 }
 
 const KNOWN_PROFILES = new Set(PROFILES.map((p) => p.id));
@@ -38,13 +41,14 @@ export class ChatPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly context: vscode.ExtensionContext;
   private readonly tracker: UsageTracker;
+  private readonly voice: VoiceBridge;
   private session?: MuseSession;
   private profile: string;
   private currentSessionId?: string;
   /** The user's last model/effort choice (undefined = the host's defaults). Remembered across chats. */
   private modelId?: string;
   private effort?: string;
-  readonly testState: TestState = { ready: 0, events: [], sessionLists: 0 };
+  readonly testState: TestState = { ready: 0, events: [], sessionLists: 0, voice: [] };
 
   static get(): ChatPanel | undefined {
     return ChatPanel.current;
@@ -73,6 +77,7 @@ export class ChatPanel {
     this.panel = panel;
     this.context = context;
     this.tracker = tracker;
+    this.voice = new VoiceBridge(context, (m) => this.post(m));
     const configured = vscode.workspace.getConfiguration("antares").get<string>("initialProfile", READ_ONLY);
     this.profile = KNOWN_PROFILES.has(configured) ? configured : READ_ONLY;
     this.modelId = context.globalState.get<string>("antares.modelId") || undefined;
@@ -81,11 +86,13 @@ export class ChatPanel {
     panel.webview.onDidReceiveMessage((message: FromWebview) => void this.onMessage(message));
     panel.onDidDispose(() => {
       ChatPanel.current = undefined;
+      this.voice.dispose();
       void this.session?.stop();
     });
   }
 
   private async dispose(): Promise<void> {
+    this.voice.dispose();
     await this.session?.stop();
     this.session = undefined;
   }
@@ -94,6 +101,7 @@ export class ChatPanel {
     if (process.env.ANTARES_TEST === "1") {
       if ("event" in message) this.testState.events.push((message as { event: ChatEvent }).event);
       if ((message as { type?: string }).type === "sessions") this.testState.sessionLists++;
+      if (/^voice/.test((message as { type?: string }).type ?? "")) this.testState.voice.push(message as { type: string });
     }
     void this.panel.webview.postMessage(message);
   }
@@ -170,6 +178,9 @@ export class ChatPanel {
         break;
       case "setProfile":
         await this.setProfile(message.profileId);
+        break;
+      case "voice":
+        await this.voice.handle(message.action);
         break;
       case "refreshUsage":
         await this.refreshUsage(false);

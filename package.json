@@ -49,6 +49,10 @@
       {
         "command": "antares.refreshUsage",
         "title": "Antares: Refresh subscription usage"
+      },
+      {
+        "command": "antares.setupVoice",
+        "title": "Antares: Set up local voice (faster-whisper)"
       }
     ],
     "configuration": {
@@ -108,6 +112,69 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Show the 5-hour and weekly usage in the status bar once Antares has been used in this window."
+        },
+        "antares.voice.engine": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "faster-whisper",
+            "windows"
+          ],
+          "enumDescriptions": [
+            "Use faster-whisper when it is set up, else Windows speech recognition when Windows has a recognizer for it.",
+            "Local Whisper on your CPU (more accurate; one-time setup of about 450 MB).",
+            "The speech recognition built into Windows (offline, nothing to install, lower quality; Windows needs a desktop speech recognizer installed, which not every PC has)."
+          ],
+          "markdownDescription": "Which engine turns your voice into text. Audio never leaves your computer with either engine."
+        },
+        "antares.voice.language": {
+          "type": "string",
+          "default": "auto",
+          "markdownDescription": "Spoken language: `auto` (Whisper detects it; Windows speech uses the editor language), a code such as `pt` or `en`, or a locale such as `pt-BR`."
+        },
+        "antares.voice.model": {
+          "type": "string",
+          "default": "base",
+          "enum": [
+            "tiny",
+            "base",
+            "small"
+          ],
+          "enumDescriptions": [
+            "About 75 MB. Fastest, makes more mistakes.",
+            "About 145 MB. A good balance on a CPU.",
+            "About 465 MB. More accurate, slower, needs more memory."
+          ],
+          "markdownDescription": "Whisper model for faster-whisper. Changing it needs `Antares: Set up local voice` to download the new model."
+        },
+        "antares.voice.home": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Folder where local voice (the private Python environment and the model, about 450 MB) is installed. Empty uses the standard per-user location. Set by `Antares: Set up local voice` when you choose a folder."
+        },
+        "antares.voice.pythonPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Python 3.9+ used to create the private environment. Empty looks for `py -3`, `python` and `python3`."
+        },
+        "antares.voice.maxSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 5,
+          "maximum": 600,
+          "markdownDescription": "Longest single dictation, in seconds. Recording stops by itself at this length."
+        },
+        "antares.voice.idleMinutes": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "markdownDescription": "The Whisper worker is stopped after this many idle minutes to give its memory back."
+        },
+        "antares.dev.voice": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Development only: fake recorder and transcriber (no microphone, no engine)."
         }
       }
     }
@@ -121,7 +188,7 @@
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
     "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
-    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts",
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts",
     "test:e2e": "node esbuild.mjs && node scripts/e2e-editor.mjs"
   },
   "devDependencies": {
