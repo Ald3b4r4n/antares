@@ -31,15 +31,13 @@ This was observed on the machine this extension was developed on, and the cause 
   about why, and the contract's `sandboxUnavailableReason` only has Linux values.
 - The setup marker and sandbox users existed, and Muse's own sandbox log showed the sandbox being used earlier the same
   day. Running `setup` again changed nothing (it is idempotent when already ready).
-- The same state was seen both from a script and from inside the editor.
+- The same state was seen from a script, from inside the editor, and from an editor running as Administrator.
 
 Things to try, in order (none confirmed to fix it):
 
 1. Start Muse's own terminal app (`muse`) and ask it to run a harmless command such as `echo hi`. If that works and
    Antares does not, the difference is in how the host is launched, and it is worth reporting.
-2. Launch the editor **elevated** (Administrator) once and open a new chat. A runtime that switches to the sandbox users
-   may need an elevated parent. This was **not tested** (the elevation prompt cannot be answered by a script), so it is
-   a hypothesis, not a result.
+2. ~~Launch the editor elevated.~~ **Tested and ruled out:** Antigravity IDE opened as Administrator (the window title showed `[Administrator]`) still showed `sandbox unavailable` in a new chat, with `muse sandbox windows check` reporting ready. Elevation of the parent process is not the cause.
 3. Check that no security software blocks the sandbox users, and that Muse is installed per user as usual.
 4. Report it with the output of `muse sandbox windows check` and the footer text, to the Muse team (it is their host)
    and as an issue on the Antares repository.
