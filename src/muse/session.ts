@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { MuseHost, MspError } from "./host.ts";
 import { mapApprovalRequest, mapModels, mapNotification, mapUsage, sandboxNote, type ChatEvent, type ModelInfo } from "./events.ts";
-import { canonicalPath, mapPlugins, mapSkills, parseSlash, rootsFor, type PluginRow, type SkillRow } from "./composer.ts";
+import { canonicalPath, mapPlugins, mapSkillImport, mapSkills, parseSlash, rootsFor, type ImportSource, type PluginRow, type SkillImportView, type SkillRow } from "./composer.ts";
 import { buildInputParts, validateImages, type ImageInput } from "./images.ts";
 import { mapSessionRows, readHistory, type SessionRowView } from "./sessions.ts";
 import { uuidv7 } from "./uuidv7.ts";
@@ -353,6 +353,19 @@ export class MuseSession extends EventEmitter {
     if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
     this.skills = mapSkills(await this.host.request("skill/list", { sessionId: this.sessionId }, 20_000));
     return this.skills;
+  }
+
+  /**
+   * Imports skills from another assistant's folders through the host (`skill/import`). With `dryRun` it only
+   * reports what would happen. A real import changes Muse's skills, so callers ask the user first, and it
+   * refreshes the skill list this session keeps for the slash palette.
+   */
+  async importSkills(source: ImportSource, dryRun: boolean): Promise<SkillImportView> {
+    await this.start();
+    if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
+    const result = mapSkillImport(await this.host.request("skill/import", { commandId: uuidv7(), sessionId: this.sessionId, source, dryRun }, 60_000));
+    if (!dryRun) await this.listSkills().catch(() => undefined);
+    return result;
   }
 
   async listPlugins(): Promise<PluginRow[]> {

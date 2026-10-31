@@ -986,6 +986,7 @@
       updateSlash();
     } else if (act === "connectors") openExtras("connectors");
     else if (act === "plugins") openExtras("plugins");
+    else if (act === "importSkills") vscode.postMessage({ type: "importSkills" });
   });
   document.addEventListener("click", (ev) => {
     if (!plusMenu.hidden && !plusMenu.contains(ev.target) && !plusBtn.contains(ev.target)) closeMenus();

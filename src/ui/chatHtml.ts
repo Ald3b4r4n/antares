@@ -75,6 +75,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <button role="menuitem" data-act="slash" class="menu-item"><span>Slash commands</span><kbd>/</kbd></button>
     <button role="menuitem" data-act="connectors" class="menu-item"><span>Connectors</span></button>
     <button role="menuitem" data-act="plugins" class="menu-item"><span>Plugins</span></button>
+    <button role="menuitem" data-act="importSkills" class="menu-item"><span>Import skills…</span></button>
   </div>
   <div class="composer">
     <button id="plus" class="icon-btn" title="Add files, photos or a folder, use a skill, see connectors and plugins" aria-label="Add to the message" aria-haspopup="menu" aria-expanded="false">

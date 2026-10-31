@@ -121,6 +121,10 @@ rl.on("line", (line) => {
         { selector: "acme:deploy", displayName: "deploy", description: "Deploy.", source: "plugin", pluginId: "acme" },
       ] } });
       break;
+    case "skill/import":
+      rec("skill-import", msg.params);
+      send({ id: msg.id, result: { commandId: msg.params.commandId, status: "accepted", source: msg.params.source, dryRun: msg.params.dryRun === true, installed: ["from-claude-a", "from-claude-b"], skipped: ["already-there"], quarantined: [{ id: "odd", reasons: ["bad frontmatter"] }], failed: [{ id: null, reason: "unreadable" }], counts: { installed: 2, quarantined: 1, skipped: 1, failed: 1 } } });
+      break;
     case "plugin/list":
       rec("plugin-list", msg.params);
       send({ id: msg.id, result: { plugins: [{ id: "acme", version: "1.2.0", enabled: true, source: "marketplaceUserAdded" }] } });

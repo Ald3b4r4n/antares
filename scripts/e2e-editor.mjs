@@ -15,6 +15,9 @@ const REAL = process.env.E2E_REAL === "1";
 // E2E_MODES=1: the real host, no model call. A session is opened (the slash palette needs one) and the permission
 // mode is switched through the real UI, which continues that session under the new profile.
 const MODES = process.env.E2E_MODES === "1";
+// E2E_IMPORT=1: the real host with no model call, in a throwaway HOME that holds one fake Claude skill, so the
+// "Import skills" flow (source, preview, confirmation, real import, nothing left to import) touches only that.
+const IMPORT = process.env.E2E_IMPORT === "1";
 // Voice mode: fake (no microphone, no engine), error (engine not set up: the setup offer), real (the real
 // microphone and the real faster-whisper from ANTARES_VOICE_HOME; records about 2.5 s and keeps nothing).
 const VOICE = process.env.E2E_VOICE ?? "fake";
@@ -44,13 +47,16 @@ const patchFile = join(work, "tool-outputs", "t1", "call_1-tool_patch.json");
 mkdirSync(join(work, "tool-outputs", "t1"), { recursive: true });
 writeFileSync(join(workspace, "plan.txt"), "alpha\nBETA\ngamma\n");
 writeFileSync(patchFile, JSON.stringify({ files: [{ path: join(workspace, "plan.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] }));
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
+const fakeHome = join(work, "home");
+mkdirSync(join(fakeHome, ".claude", "skills", "demo-import"), { recursive: true });
+writeFileSync(join(fakeHome, ".claude", "skills", "demo-import", "SKILL.md"), "---\nname: demo-import\ndescription: A fake skill used only by the Antares end-to-end check.\n---\nSay hello.\n");
 
 const child = spawn(
   exe,
   [workspace, `--user-data-dir=${userData}`, `--extensions-dir=${join(work, "extensions")}`, `--extensionDevelopmentPath=${root}`, `--remote-debugging-port=${port}`, "--disable-workspace-trust", "--skip-release-notes", "--skip-welcome", "--new-window"],
-  { stdio: "ignore", env: REAL ? { ...process.env } : { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" } },
+  { stdio: "ignore", env: REAL ? { ...process.env } : { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), ...(IMPORT ? { HOME: fakeHome, USERPROFILE: fakeHome } : {}), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" } },
 );
 child.on("error", (e) => console.error("launch error:", e.message));
 
@@ -231,7 +237,7 @@ try {
   check("model and effort controls exist", dom.modelControls);
   check("page styles loaded", dom.cssLoaded);
 
-  if (!MODES && !REAL) {
+  if (!MODES && !REAL && !IMPORT) {
     // Tool presentation: a checklist instead of JSON, and a file edit as a diff with buttons to open VS Code's diff.
     await waitFor("the demo tool cards", () => evalWeb("d.querySelectorAll('.tool').length >= 2 && d.querySelectorAll('.patch-line').length > 0"), 20000);
     const cards = await evalWeb("({ todos: [...d.querySelectorAll('.todo')].map(x => x.className.replace('todo ', '') + ':' + x.querySelector('.todo-text').textContent), todoSummary: d.querySelector('.tool .tool-summary').textContent, edit: { summary: [...d.querySelectorAll('.tool-summary')].pop().textContent, changed: d.querySelector('.patch-head .tool-changed')?.textContent, lines: [...d.querySelectorAll('.patch-line')].map(x => x.className.replace('patch-line ', '') + ':' + x.textContent), buttons: [...d.querySelectorAll('.patch-head button')].map(b => b.textContent) } })");
@@ -249,7 +255,40 @@ try {
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
   }
 
-  if (MODES) {
+  if (IMPORT) {
+    const dialogNow = () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return b ? { text: b.textContent.slice(0, 600), buttons: [...b.querySelectorAll('.dialog-buttons .monaco-button')].map(x => x.textContent.trim()) } : null; })()");
+    const clickDialog = (label) => evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === " + JSON.stringify(label) + "); btn.click(); return true; })()");
+    const startImport = () => evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=importSkills]').click(); return true; })()");
+    const notices = () => evalWeb("[...d.querySelectorAll('.notice')].map(n => n.textContent.slice(0, 160))");
+
+    await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
+    const items = await evalWeb("[...d.querySelectorAll('#plusMenu .menu-item span:first-child')].map(s => s.textContent)");
+    check("the + menu offers Import skills", items.includes("Import skills\u2026"), JSON.stringify(items));
+    await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
+
+    await startImport();
+    const ask = await waitFor("the import confirmation", dialogNow, 60000);
+    check("the preview comes first: the dialog names the skill and says nothing has been changed yet", /Import 1 skill from Claude/.test(ask.text) && /demo-import/.test(ask.text) && /Nothing has been changed yet/.test(ask.text) && /read what you import/.test(ask.text) && ask.buttons.includes("Import"), JSON.stringify(ask));
+    await shot("28-import-confirm");
+    await clickDialog("Cancel");
+    await sleep(800);
+    check("cancelling the dialog imports nothing", !(await notices()).some((n) => /Imported/.test(n)), JSON.stringify(await notices()));
+
+    await startImport();
+    await waitFor("the import confirmation again", dialogNow, 60000);
+    await clickDialog("Import");
+    await waitFor("the import result", async () => (await notices()).some((n) => /Imported 1 skill from Claude/.test(n)), 60000);
+    check("confirming imports the skill and reports it", (await notices()).some((n) => /Imported 1 skill from Claude/.test(n)), JSON.stringify(await notices()));
+
+    await startImport();
+    await waitFor("the nothing-left notice", async () => (await notices()).some((n) => /Nothing new to import from Claude/.test(n)), 60000);
+    check("running it again finds nothing new (already imported)", (await notices()).some((n) => /Nothing new to import from Claude \(1 already imported\)/.test(n)), JSON.stringify(await notices()));
+
+    await evalWeb("(() => { const i = d.getElementById('input'); i.focus(); i.value = '/demo'; i.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()");
+    await waitFor("the slash palette", () => evalWeb("[...d.querySelectorAll('#slashMenu .slash-name')].some(n => n.textContent === '/demo-import')"), 30000);
+    check("the imported skill is in the slash palette", true);
+    await shot("29-import-done");
+  } else if (MODES) {
     const openMenu = () => evalWeb("(() => { d.getElementById('modeBtn').click(); return true; })()");
     const pick = (id) => evalWeb("(() => { d.querySelector('#modeMenu [data-mode=" + id + "]').click(); return true; })()");
     const modeState = () => evalWeb("({ label: d.getElementById('modeLabel').textContent, footer: d.getElementById('meta').textContent.slice(0, 60), notices: [...d.querySelectorAll('.notice')].map(n => n.textContent.slice(0, 130)), errors: d.querySelectorAll('.notice.error').length, planNote: !d.getElementById('modeNote').hidden })");
@@ -509,7 +548,7 @@ try {
     // The menu.
     await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
     const menu = await evalWeb("({ open: !d.getElementById('plusMenu').hidden, expanded: d.getElementById('plus').getAttribute('aria-expanded'), items: [...d.querySelectorAll('#plusMenu .menu-item')].map(b => b.querySelector('span').textContent) })");
-    check("the + button opens a menu with files, folder, slash commands, connectors and plugins", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Slash commands", "Connectors", "Plugins"]), JSON.stringify(menu));
+    check("the + button opens a menu with files, folder, slash commands, connectors, plugins and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Slash commands", "Connectors", "Plugins", "Import skills…"]), JSON.stringify(menu));
     await shot("15-plus-menu");
 
     // Files and photos: a text file inside the workspace becomes @path, a name with a space is quoted, a photo

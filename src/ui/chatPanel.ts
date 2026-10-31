@@ -24,6 +24,7 @@ type FromWebview =
   | { type: "listSkills" }
   | { type: "listConnectors" }
   | { type: "listPlugins" }
+  | { type: "importSkills" }
   | { type: "unqueue"; turnId: string }
   | { type: "openFile"; itemId: string; path: string }
   | { type: "openDiff"; itemId: string; path: string }
@@ -213,6 +214,9 @@ export class ChatPanel {
         break;
       case "listPlugins":
         await this.listPlugins();
+        break;
+      case "importSkills":
+        await this.importSkills();
         break;
       case "unqueue":
         await this.unqueue(message.turnId);
@@ -673,6 +677,41 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       this.post({ type: "skills", skills: await session.listSkills() });
     } catch (error) {
       this.post({ type: "skills", skills: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /**
+   * "Import skills": copies skills from Claude's or Codex's folders into Muse, through the host. It always shows
+   * the host's own preview first and changes nothing until the user confirms; skills are instructions the model
+   * follows, so the dialog says to read them. Afterwards the slash palette is refreshed.
+   */
+  private async importSkills(): Promise<void> {
+    const session = this.ensureSession(true) ?? this.ensureSession(false);
+    if (!session) return;
+    const dev = this.devPicks();
+    const pick = dev.length > 0 ? dev[0] : (await vscode.window.showQuickPick(["Claude", "Codex"], { title: "Import skills from…", placeHolder: "Where are the skills now?" }))?.toLowerCase();
+    if (pick !== "claude" && pick !== "codex") return;
+    const label = pick === "claude" ? "Claude" : "Codex";
+    try {
+      const preview = await session.importSkills(pick, true);
+      if (preview.installed.length === 0) {
+        const why = [preview.skipped.length ? `${preview.skipped.length} already imported` : "", preview.quarantined.length ? `${preview.quarantined.length} held back` : "", preview.failed.length ? `${preview.failed.length} could not be read` : ""].filter(Boolean).join(", ");
+        this.notice("info", `Nothing new to import from ${label}${why ? ` (${why})` : ""}.`);
+        return;
+      }
+      const shown = preview.installed.slice(0, 15).join(", ") + (preview.installed.length > 15 ? `, and ${preview.installed.length - 15} more` : "");
+      const extra = [preview.skipped.length ? `${preview.skipped.length} already imported (left alone)` : "", preview.quarantined.length ? `${preview.quarantined.length} held back by Muse` : "", preview.failed.length ? `${preview.failed.length} could not be read` : ""].filter(Boolean).join("; ");
+      const choice = await vscode.window.showWarningMessage(
+        `Import ${preview.installed.length} skill${preview.installed.length === 1 ? "" : "s"} from ${label}?`,
+        { modal: true, detail: `${shown}${extra ? `\n\n${extra}.` : ""}\n\nThis copies them into Muse's skills so they appear under / in every chat. A skill is a set of instructions the model follows: read what you import. Nothing has been changed yet.` },
+        "Import",
+      );
+      if (choice !== "Import") return;
+      const done = await session.importSkills(pick, false);
+      this.notice("info", `Imported ${done.installed.length} skill${done.installed.length === 1 ? "" : "s"} from ${label}${done.quarantined.length ? `; ${done.quarantined.length} held back by Muse` : ""}${done.failed.length ? `; ${done.failed.length} could not be imported` : ""}.`);
+      this.post({ type: "skills", skills: await session.listSkills() });
+    } catch (error) {
+      this.notice("error", `Could not import skills: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

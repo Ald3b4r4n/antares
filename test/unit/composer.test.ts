@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { appendMentions, canonicalPath, filterSkills, imageTypeFor, mapMcpServers, mapPlugins, mapSkills, mentionFor, parseSlash, rootsFor } from "../../src/muse/composer.ts";
+import { appendMentions, canonicalPath, filterSkills, imageTypeFor, mapMcpServers, mapPlugins, mapSkillImport, mapSkills, mentionFor, parseSlash, rootsFor } from "../../src/muse/composer.ts";
 import type { ChatEvent } from "../../src/muse/events.ts";
 import { mapNotification } from "../../src/muse/events.ts";
 import { buildInputParts } from "../../src/muse/images.ts";
@@ -222,6 +222,33 @@ test("session: added folders are sent as the whole sticky root set, once, with t
     await t.session.send("alone again");
     await until(() => t.report().turnStarts.length === 3, "third turn/start");
     assert.deepEqual(t.report().turnStarts[2]?.workspaceRoots, [canonicalPath(t.dir)], "removing the folder replaces the set");
+  } finally {
+    await t.done();
+  }
+});
+
+test("skill import: the host's receipt is mapped defensively", () => {
+  const view = mapSkillImport({ source: "claude", dryRun: true, installed: ["a", "b", 3], skipped: ["c"], quarantined: [{ id: "q", reasons: ["bad", 1] }, { reasons: ["no id"] }], failed: [{ id: null, reason: "unreadable" }, { id: "f" }, "junk"] });
+  assert.deepEqual(view, { source: "claude", dryRun: true, installed: ["a", "b"], quarantined: [{ id: "q", reasons: ["bad"] }], skipped: ["c"], failed: [{ id: null, reason: "unreadable" }, { id: "f", reason: "unknown" }] });
+  assert.deepEqual(mapSkillImport(undefined), { source: "unknown", dryRun: false, installed: [], quarantined: [], skipped: [], failed: [] });
+});
+
+test("session: a skill import preview sends dryRun and leaves the skill list alone; a real import refreshes it", async () => {
+  const t = run();
+  try {
+    const preview = await t.session.importSkills("claude", true);
+    assert.equal(preview.dryRun, true);
+    assert.deepEqual(preview.installed, ["from-claude-a", "from-claude-b"]);
+    assert.equal(preview.quarantined[0]?.id, "odd");
+    assert.equal(t.report().skillImports[0]?.dryRun, true);
+    assert.equal(t.report().skillImports[0]?.source, "claude");
+    assert.equal(t.report().skillLists.length, 0, "a preview does not re-read the skills");
+
+    const done = await t.session.importSkills("codex", false);
+    assert.equal(done.dryRun, false);
+    assert.equal(t.report().skillImports[1]?.dryRun, false);
+    assert.equal(t.report().skillImports[1]?.source, "codex");
+    assert.equal(t.report().skillLists.length, 1, "after a real import the skill list is read again");
   } finally {
     await t.done();
   }

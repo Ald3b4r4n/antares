@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — phase 3A (first slice): import skills
+
+- "Import skills…" in the "+" menu: choose Claude or Codex, see the host's own preview (`skill/import` with `dryRun`, which writes nothing), confirm in a dialog that lists the skills and says to read what you import, then the host imports them and the slash palette refreshes. Running it again reports what is already imported. Skill activation is not offered: it can be written but not read back (see the protocol notes).
+- Tests: 140 unit tests (2 new); a new real-window flow, `E2E_IMPORT=1`, runs the real host with no model call in a throwaway HOME holding one fake Claude skill (12 checks on both editors); the other flows still pass (37 and 17).
+
 ## Unreleased — phase 3D (first slice): tool presentation and diffs
 
 - `write_todos` shows a checklist (done, in progress, to do) instead of JSON.

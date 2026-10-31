@@ -95,6 +95,31 @@ export function mapPlugins(result: unknown): PluginRow[] {
   return out.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+export type ImportSource = "claude" | "codex";
+
+/** What `skill/import` reports, for a preview (`dryRun`) and for the real run alike. */
+export interface SkillImportView {
+  source: string;
+  dryRun: boolean;
+  /** Ids installed, or that would be installed in a preview. */
+  installed: string[];
+  quarantined: { id: string; reasons: string[] }[];
+  /** Ids not installed because they are already imported or duplicated. */
+  skipped: string[];
+  failed: { id: string | null; reason: string }[];
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+export function mapSkillImport(result: unknown): SkillImportView {
+  const r = isObj(result) ? result : {};
+  const quarantined: SkillImportView["quarantined"] = [];
+  for (const q of Array.isArray(r.quarantined) ? r.quarantined : []) if (isObj(q) && str(q.id)) quarantined.push({ id: str(q.id)!, reasons: strings(q.reasons) });
+  const failed: SkillImportView["failed"] = [];
+  for (const f of Array.isArray(r.failed) ? r.failed : []) if (isObj(f)) failed.push({ id: str(f.id) ?? null, reason: str(f.reason) ?? "unknown" });
+  return { source: str(r.source) ?? "unknown", dryRun: r.dryRun === true, installed: strings(r.installed), quarantined, skipped: strings(r.skipped), failed };
+}
+
 export interface McpRow {
   name: string;
   /** settings, plugin or session. */
