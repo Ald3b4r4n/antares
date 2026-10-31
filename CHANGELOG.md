@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — phase 3C: images from the workspace
+
+- A `read_file` of an image shows that file's thumbnail on its tool card, and `![alt](path)` in an assistant message shows the file. The page only asks; the **extension** reads the file and answers with the data or the reason it refused.
+- What is read: no URL or network path (nothing is fetched), PNG, JPEG, GIF or WebP by name (SVG left out on purpose), inside the chat's folders after resolving symlinks and short names, up to 5 MB, and the bytes must really be that type. A refused image is replaced by its alt text and the reason.
+- Measured, and why the image a model saw is not shown: one real turn where the model read a PNG with `read_file` returned only text ("Read image file ... as model-visible image output") and the item had no `modelVisibleContent` or `outputRef`, live or in the resumed history. Nothing for `item/readOutput` to fetch. Model-generated images remain unsupported by the contract.
+- Probe: `scripts/probe-tool-image.ts` (one real turn, throwaway folder, generated PNG).
+- Tests: 163 unit tests (8 new, every refusal path); the real-window flow checks a valid image, one outside the workspace and a web address (42 checks on both editors).
+- Not verified: a real turn showing the cards in the interface (the events are synthetic in the window).
+
 ## Unreleased — phase 3B: browser and app control
 
 - **Computer Use approvals.** When Muse sends `cuaCardFacts`, the approval card shows the page's host (with its plain `xn--` form and a warning when the address is not ASCII), the window title quoted and as plain text, each consequential step worded as the contract says ("Step N: action role "label" — effect"), and the data the call would send, with secrets masked and never shown. A warning says to read every step.
