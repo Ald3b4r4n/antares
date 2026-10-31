@@ -11,6 +11,12 @@
   const hint = $("hint");
   const modelSel = $("model");
   const effortSel = $("effort");
+  const attachmentsEl = $("attachments");
+  const attachBtn = $("attach");
+  const fileInput = $("file");
+
+  // Antares' own conservative limits (the host's are not published); the extension re-checks them.
+  const IMAGE = { allowed: ["image/png", "image/jpeg", "image/gif", "image/webp"], max: 6, maxBytes: 5 * 1024 * 1024, maxTotal: 15 * 1024 * 1024, maxSide: 2048 };
 
   const COPY_ICON =
     '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor"/><path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" fill="none" stroke="currentColor"/></svg>';
@@ -20,6 +26,9 @@
     items: new Map(), // itemId -> { el, text, role, raf }
     tools: new Map(), // itemId -> element
     approvals: new Map(), // approvalId -> { el, event, decided }
+    attachments: [], // pending images: { mediaType, base64Data, width, height, dataUrl, bytes }
+    lastSent: [], // the images of the message just sent, restored if the send is refused
+    sentQueue: [], // thumbnails of sent messages, matched to the host's userMessage by image count
     models: [],
     modelId: undefined, // the user's remembered choice, if any
     effort: undefined, // undefined = the model's default
@@ -87,13 +96,13 @@
     messages.appendChild(node);
     if (stick) scrollDown();
   }
-  function addMessage(itemId, role, text, streaming) {
+  function addMessage(itemId, role, text, streaming, thumbs) {
     const node = el("div", "msg " + role + (streaming ? " streaming" : ""));
     node.innerHTML =
       '<div class="msg-head"><span class="who">' + (role === "user" ? "You" : "Muse") + "</span>" +
       '<button class="copy" data-copy="message" title="Copy message">' + COPY_ICON + '<span class="label">Copy</span></button></div>' +
       '<div class="body"></div>';
-    const item = { el: node, text, role, raf: 0 };
+    const item = { el: node, text, role, raf: 0, thumbs: thumbs || [] };
     state.items.set(itemId, item);
     paint(item);
     append(node);
@@ -101,8 +110,29 @@
   }
   function paint(item) {
     const body = item.el.querySelector(".body");
-    if (item.role === "user") body.textContent = item.text;
+    if (item.role === "user") renderUserBody(body, item);
     else body.innerHTML = renderMarkdown(item.text);
+  }
+  // The host appends "[Image #n]" markers to the text of a message with images and does not send the
+  // bytes back, so the markers become chips and the thumbnails are the ones kept locally.
+  function renderUserBody(body, item) {
+    body.replaceChildren();
+    const parts = item.text.split(/(\[Image #\d+\])/);
+    for (const part of parts) {
+      const m = /^\[Image #(\d+)\]$/.exec(part);
+      if (m) body.append(el("span", "chip", "Image " + m[1]));
+      else if (part) body.append(document.createTextNode(part));
+    }
+    if (item.thumbs.length) {
+      const row = el("div", "sent-thumbs");
+      for (const t of item.thumbs) {
+        const img = el("img", "sent-thumb");
+        img.src = t.dataUrl;
+        img.alt = "Attached image " + (t.width && t.height ? "(" + t.width + "×" + t.height + ")" : "");
+        row.append(img);
+      }
+      body.append(row);
+    }
   }
   function schedulePaint(item) {
     if (item.raf) return;
@@ -329,7 +359,7 @@
     }
     profileSel.value = state.profileId;
     const current = state.profiles.find((p) => p.id === state.profileId);
-    hint.textContent = (current ? "Profile " + current.id + ": " + current.note + " " : "") + "Enter sends · Shift+Enter adds a line.";
+    hint.textContent = (current ? "Profile " + current.id + ": " + current.note + " " : "") + "Enter sends · Shift+Enter adds a line · paste, drop or attach images.";
     renderMeta();
   }
   profileSel.addEventListener("change", () => {
@@ -346,9 +376,15 @@
         state.background.clear();
         setRunning(true, "Thinking…");
         break;
-      case "userMessage":
-        addMessage(e.itemId, "user", e.text, false);
+      case "userMessage": {
+        // Count images by the "[Image #n]" markers as well: an ephemeral host sends the markers but an empty
+        // attachments list.
+        const count = Math.max((e.text.match(/\[Image #\d+\]/g) || []).length, (e.attachments || []).filter((a) => a.type === "image").length);
+        const at = count ? state.sentQueue.findIndex((q) => q.length === count) : -1;
+        const thumbs = at >= 0 ? state.sentQueue.splice(at, 1)[0] : [];
+        addMessage(e.itemId, "user", e.text, false, thumbs);
         break;
+      }
       case "assistantStarted":
         addMessage(e.itemId, "assistant", "", true);
         setRunning(true, "Responding…");
@@ -430,6 +466,12 @@
         break;
       case "notice":
         addNotice(e.level, e.text);
+        // A refused send must not eat the user's images: put them back.
+        if (e.level === "error" && state.sentQueue.length && state.attachments.length === 0) {
+          state.attachments = state.lastSent;
+          state.sentQueue.length = 0;
+          renderAttachments();
+        }
         break;
       default:
         break;
@@ -444,6 +486,9 @@
     else if (msg.type === "reset") {
       for (const node of messages.querySelectorAll(".msg, .notice, .tool, .approval")) node.remove();
       state.items.clear();
+      state.attachments = [];
+      state.sentQueue.length = 0;
+      renderAttachments();
       state.tools.clear();
       state.approvals.clear();
       state.tokens = state.context = undefined;
@@ -489,11 +534,141 @@
   }
   function send() {
     const text = input.value.trim();
-    if (!text || state.running) return;
+    const images = state.attachments;
+    if ((!text && images.length === 0) || state.running) return;
     input.value = "";
     autosize();
-    vscode.postMessage({ type: "send", text });
+    if (images.length) {
+      state.lastSent = images;
+      state.sentQueue.push(images.map((a) => ({ dataUrl: a.dataUrl, width: a.width, height: a.height })));
+    }
+    state.attachments = [];
+    renderAttachments();
+    vscode.postMessage({
+      type: "send",
+      text,
+      images: images.length ? images.map((a) => ({ mediaType: a.mediaType, base64Data: a.base64Data, width: a.width, height: a.height })) : undefined,
+    });
   }
+
+  // ---- image attachments: paste, drop, or the attach button ----
+  const approxBytes = (b64) => Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
+  const readDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  const loadImage = (dataUrl) =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("not an image"));
+      img.src = dataUrl;
+    });
+
+  async function toAttachment(file) {
+    let dataUrl = await readDataUrl(file);
+    const img = await loadImage(dataUrl);
+    let { naturalWidth: width, naturalHeight: height } = img;
+    // Large images are scaled down (PNG) before sending; small ones are sent untouched.
+    if (Math.max(width, height) > IMAGE.maxSide) {
+      const scale = IMAGE.maxSide / Math.max(width, height);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(width * scale);
+      canvas.height = Math.round(height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      dataUrl = canvas.toDataURL("image/png");
+      width = canvas.width;
+      height = canvas.height;
+    }
+    const comma = dataUrl.indexOf(",");
+    const mediaType = dataUrl.slice(5, dataUrl.indexOf(";"));
+    const base64Data = dataUrl.slice(comma + 1);
+    return { mediaType, base64Data, width, height, dataUrl, bytes: approxBytes(base64Data) };
+  }
+
+  async function addFiles(files) {
+    for (const file of files) {
+      if (state.attachments.length >= IMAGE.max) {
+        addNotice("warning", "At most " + IMAGE.max + " images can be sent in one message.");
+        break;
+      }
+      if (!IMAGE.allowed.includes(file.type)) {
+        addNotice("warning", (file.name || "That file") + " is not a PNG, JPEG, GIF or WebP image.");
+        continue;
+      }
+      try {
+        const att = await toAttachment(file);
+        const total = state.attachments.reduce((n, a) => n + a.bytes, 0) + att.bytes;
+        if (att.bytes > IMAGE.maxBytes) addNotice("warning", "That image is too large (" + (att.bytes / 1048576).toFixed(1) + " MB; the limit is " + IMAGE.maxBytes / 1048576 + " MB).");
+        else if (total > IMAGE.maxTotal) addNotice("warning", "The images together are too large (the limit is " + IMAGE.maxTotal / 1048576 + " MB).");
+        else state.attachments.push(att);
+      } catch {
+        addNotice("warning", (file.name || "That file") + " could not be read as an image.");
+      }
+    }
+    renderAttachments();
+  }
+
+  function renderAttachments() {
+    attachmentsEl.replaceChildren();
+    attachmentsEl.hidden = state.attachments.length === 0;
+    state.attachments.forEach((a, i) => {
+      const box = el("div", "thumb");
+      const img = el("img");
+      img.src = a.dataUrl;
+      img.alt = "Image " + (i + 1);
+      const remove = el("button", "thumb-remove", "×");
+      remove.title = "Remove image";
+      remove.setAttribute("aria-label", "Remove image " + (i + 1));
+      remove.addEventListener("click", () => {
+        state.attachments.splice(i, 1);
+        renderAttachments();
+      });
+      box.append(img, remove, el("span", "thumb-dims", a.width + "×" + a.height));
+      attachmentsEl.append(box);
+    });
+  }
+
+  const imageFiles = (list) => [...(list || [])].filter((f) => f && f.type && f.type.startsWith("image/"));
+  input.addEventListener("paste", (ev) => {
+    const cd = ev.clipboardData;
+    if (!cd) return;
+    const files = [...cd.items].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile());
+    // A clipboard with text keeps its normal text paste; an image-only clipboard (a screenshot) attaches.
+    if (files.length === 0 || cd.getData("text/plain")) return;
+    ev.preventDefault();
+    void addFiles(files.filter(Boolean));
+  });
+  let dragDepth = 0;
+  const hasFiles = (ev) => [...(ev.dataTransfer?.types || [])].includes("Files");
+  window.addEventListener("dragenter", (ev) => {
+    if (!hasFiles(ev)) return;
+    dragDepth++;
+    document.body.classList.add("dragging");
+  });
+  window.addEventListener("dragleave", (ev) => {
+    if (!hasFiles(ev)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) document.body.classList.remove("dragging");
+  });
+  window.addEventListener("dragover", (ev) => {
+    if (hasFiles(ev)) ev.preventDefault();
+  });
+  window.addEventListener("drop", (ev) => {
+    if (!hasFiles(ev)) return;
+    ev.preventDefault();
+    dragDepth = 0;
+    document.body.classList.remove("dragging");
+    void addFiles([...ev.dataTransfer.files]);
+  });
+  attachBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    void addFiles([...fileInput.files]);
+    fileInput.value = "";
+  });
   input.addEventListener("input", autosize);
   input.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {

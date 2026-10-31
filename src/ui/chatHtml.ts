@@ -17,7 +17,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
   const { cspSource, nonce, mediaUri, preScript } = options;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource}; style-src ${cspSource}; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} data:; style-src ${cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${mediaUri("chat.css")}">
 <title>Antares</title></head><body>
 <header>
@@ -31,7 +31,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
 <div id="messages">
   <div class="hero"><img src="${mediaUri("antares.svg")}" alt="">
     <div><pre class="logo">${escapeHtml(ANTARES_ASCII)}</pre><p class="tag">${escapeHtml(ANTARES_TAGLINE)}</p></div></div>
-  <p class="hint" id="hint">Enter sends · Shift+Enter adds a line.</p>
+  <p class="hint" id="hint">Enter sends · Shift+Enter adds a line · paste, drop or attach images.</p>
 </div>
 <footer>
   <div id="meta"></div>
@@ -41,7 +41,12 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <label for="effort">Effort</label>
     <select id="effort" title="Reasoning effort sent with each message"></select>
   </div>
+  <div id="attachments" class="attachments" hidden></div>
+  <input id="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
   <div class="composer">
+    <button id="attach" class="icon-btn" title="Attach an image (you can also paste or drop one)" aria-label="Attach an image">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="none" stroke="currentColor"/><circle cx="5.5" cy="6" r="1.2" fill="currentColor"/><path d="M2 12l3.5-3.5 2.5 2.5 2.5-3L14 12" fill="none" stroke="currentColor" stroke-linejoin="round"/></svg>
+    </button>
     <textarea id="input" rows="1" placeholder="Message Muse…" aria-label="Message"></textarea>
     <button id="send" class="primary">Send</button>
     <button id="stop" class="stop" hidden>Stop</button>

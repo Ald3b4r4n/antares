@@ -29,11 +29,14 @@ const config = () => ({ type: "config", profileId, profiles: PROFILES, modelId, 
 let n = 0;
 const decisions = new Map(); // approvalId -> resolve
 
-function startTurn(text) {
+// Like the real host: "[Image #n]" markers are appended to the text and only metadata comes back.
+function startTurn(text, images) {
   const turnId = "t" + ++n;
+  const list = images || [];
+  const marked = text + list.map((_, i) => "[Image #" + (i + 1) + "]").join("");
   emit({ type: "status", status: "running" });
   emit({ type: "turnStarted", turnId });
-  emit({ type: "userMessage", itemId: "u" + n, text });
+  emit({ type: "userMessage", itemId: "u" + n, text: marked, attachments: /ephemeral/i.test(text) ? [] : list.map((im, i) => ({ type: "image", mediaType: im.mediaType, width: im.width, height: im.height, attachmentId: "att/" + (i + 1) })) });
   return turnId;
 }
 function finishTurn(turnId) {
@@ -52,8 +55,8 @@ async function stream(id, text) {
   emit({ type: "assistantCompleted", itemId: id, text });
 }
 
-async function plainTurn(text) {
-  const turnId = startTurn(text);
+async function plainTurn(text, images) {
+  const turnId = startTurn(text, images);
   await sleep(400);
   await stream("a" + n, reply);
   emit({ type: "foregroundCompleted", turnId });
@@ -92,14 +95,18 @@ async function approvalTurn(text, unknown) {
   finishTurn(turnId);
 }
 
-async function turn(text) {
+async function turn(text, images) {
+  if (/refuse/i.test(text)) {
+    emit({ type: "notice", level: "error", text: "Image 1: the content is not a image/png image." });
+    return;
+  }
   if (/error/i.test(text)) {
     const turnId = startTurn(text);
     await sleep(200);
     emit({ type: "turnCompleted", turnId, terminal: "failed", errorKind: "authRequired", errorMessage: "not logged in: run /login to add an API key", durationMs: 99 });
   } else if (/unknown/i.test(text)) await approvalTurn(text, true);
   else if (/approve/i.test(text)) await approvalTurn(text, false);
-  else await plainTurn(text);
+  else await plainTurn(text, images);
 }
 
 window.__sent = [];
@@ -119,7 +126,7 @@ window.acquireVsCodeApi = () => ({
     } else if (m.type === "setEffort") {
       effort = m.effort;
       post(config());
-    } else if (m.type === "send") turn(m.text);
+    } else if (m.type === "send") turn(m.text, m.images);
     else if (m.type === "decide") decisions.get(m.approvalId)?.({ decision: m.choiceId === "c-deny" ? "denied" : m.choiceId === "c-once" ? "approved" : m.choiceId === "c-session" ? "approvedForSession" : "approvedPolicyAmendment" });
     else if (m.type === "setProfile") {
       profileId = m.profileId;

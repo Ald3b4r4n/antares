@@ -21,6 +21,15 @@ export interface ModelInfo {
   defaultReasoningEffort?: string;
 }
 
+/** Metadata the host reports for an attachment. The bytes are NOT sent back, only this. */
+export interface AttachmentInfo {
+  type: string;
+  mediaType?: string;
+  width?: number;
+  height?: number;
+  attachmentId?: string;
+}
+
 export interface ApprovalChoiceView {
   choiceId: string;
   label: string;
@@ -53,7 +62,7 @@ export const PROFILES: { id: string; label: string; note: string }[] = [
 
 export type ChatEvent =
   | { type: "turnStarted"; turnId: string }
-  | { type: "userMessage"; itemId: string; text: string }
+  | { type: "userMessage"; itemId: string; text: string; attachments: AttachmentInfo[] }
   | { type: "assistantStarted"; itemId: string }
   | { type: "assistantDelta"; itemId: string; delta: string }
   | { type: "assistantCompleted"; itemId: string; text: string }
@@ -160,7 +169,7 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
       const kind = str(item?.kind);
       if (!item || !itemId || !kind) return undefined;
       const started = method === "item/started";
-      if (kind === "userMessage" && !started) return { type: "userMessage", itemId, text: str(item.text) ?? "" };
+      if (kind === "userMessage" && !started) return { type: "userMessage", itemId, text: str(item.text) ?? "", attachments: mapAttachments(item.attachments) };
       if (kind === "agentMessage") {
         return started
           ? { type: "assistantStarted", itemId }
@@ -277,6 +286,16 @@ export function mapModels(result: unknown): ModelInfo[] {
     });
   }
   return models;
+}
+
+export function mapAttachments(value: unknown): AttachmentInfo[] {
+  if (!Array.isArray(value)) return [];
+  const out: AttachmentInfo[] = [];
+  for (const a of value) {
+    if (!isObj(a)) continue;
+    out.push({ type: str(a.type) ?? "unknown", mediaType: str(a.mediaType), width: num(a.width), height: num(a.height), attachmentId: str(a.attachmentId) });
+  }
+  return out;
 }
 
 /** Short, human-judgeable summary of a tool call's arguments (a JSON string or an object). */

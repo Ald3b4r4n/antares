@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { MuseHost, MspError } from "./host.ts";
 import { mapApprovalRequest, mapModels, mapNotification, mapUsage, type ChatEvent, type ModelInfo } from "./events.ts";
+import { buildInputParts, validateImages, type ImageInput } from "./images.ts";
 import { uuidv7 } from "./uuidv7.ts";
 
 export const READ_ONLY = ":read-only";
@@ -231,14 +232,21 @@ export class MuseSession extends EventEmitter {
     void this.interrupt();
   }
 
-  /** Sends one user prompt. Resolves when the host accepted it, not when the turn ends. */
-  async send(text: string): Promise<void> {
+  /**
+   * Sends one user prompt (text and/or images). Resolves when the host accepted it, not when the
+   * turn ends. Images are validated here as well, because they come from the webview.
+   */
+  async send(text: string, images: ImageInput[] = []): Promise<void> {
+    const checked = validateImages(images);
+    if (!checked.ok) throw new Error(checked.error);
+    const input = buildInputParts(text, checked.images);
+    if (input.length === 0) throw new Error("There is nothing to send.");
     await this.start();
     if (!this.host || !this.sessionId) throw new Error("Muse session is not available.");
     await this.host.request("turn/start", {
       commandId: uuidv7(),
       sessionId: this.sessionId,
-      input: [{ type: "text", text }],
+      input,
       ...(this.effort ? { reasoningEffort: this.effort } : {}),
     }, 30_000);
   }

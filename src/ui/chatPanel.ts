@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
+import { validateImages, type ImageInput } from "../muse/images.ts";
 import { locateMuse } from "../muse/locate.ts";
 import { MuseSession, READ_ONLY } from "../muse/session.ts";
 import { chatHtml } from "./chatHtml.ts";
 
 type FromWebview =
   | { type: "ready" }
-  | { type: "send"; text: string }
+  | { type: "send"; text: string; images?: ImageInput[] }
   | { type: "stop" }
   | { type: "newChat" }
   | { type: "setProfile"; profileId: string }
@@ -127,7 +128,7 @@ export class ChatPanel {
         this.post({ type: "copied" });
         break;
       case "send":
-        await this.send(message.text);
+        await this.send(message.text, message.images);
         break;
       case "stop":
         await this.session?.interrupt();
@@ -261,11 +262,18 @@ export class ChatPanel {
     return session;
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, images?: ImageInput[]): Promise<void> {
+    // The webview is untrusted input: check before a host is even started for this message.
+    const checked = validateImages(images);
+    if (!checked.ok) {
+      this.notice("error", checked.error);
+      return;
+    }
+    if (typeof text !== "string" || (text.trim() === "" && checked.images.length === 0)) return;
     const session = this.ensureSession();
     if (!session) return;
     try {
-      await session.send(text);
+      await session.send(text, checked.images);
     } catch (error) {
       this.notice("error", `Could not send the message: ${error instanceof Error ? error.message : String(error)}`);
     }

@@ -131,3 +131,17 @@ select#profile:focus { outline: none; border-color: var(--focus); }
 .controls select { background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; font: inherit; max-width: 100%; }
 .controls select:focus { outline: none; border-color: var(--focus); }
 .controls select:disabled { opacity: .55; }
+
+/* ---- image attachments ---- */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; flex: none; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; }
+.icon-btn:hover { color: var(--fg); border-color: var(--antares); }
+.attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.thumb { position: relative; width: 72px; }
+.thumb img { display: block; width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); }
+.thumb-remove { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--fg); cursor: pointer; line-height: 1; padding: 0; }
+.thumb-remove:hover { border-color: var(--error); color: var(--error); }
+.thumb-dims { display: block; text-align: center; font-size: 10px; color: var(--muted); margin-top: 2px; }
+.chip { display: inline-block; font-size: 11px; padding: 0 6px; margin: 0 2px 0 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); }
+.sent-thumbs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.sent-thumb { max-width: 160px; max-height: 120px; border: 1px solid var(--border); border-radius: 6px; object-fit: contain; background: var(--code-bg); }
+body.dragging::after { content: "Drop images to attach"; position: fixed; inset: 8px; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--antares); border-radius: 10px; background: rgba(0, 0, 0, .55); color: var(--fg); font-size: 16px; pointer-events: none; z-index: 10; }

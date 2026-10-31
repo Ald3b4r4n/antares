@@ -2,6 +2,7 @@
 import * as assert from "node:assert/strict";
 import * as vscode from "vscode";
 import type { AntaresApi } from "../../src/extension.ts";
+import { makeSolidPng } from "../fixtures/png.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(what: string, check: () => boolean, timeoutMs = 30_000): Promise<void> {
@@ -50,6 +51,22 @@ export async function run(): Promise<void> {
   await vscode.env.clipboard.writeText("before");
   await panel.onMessage({ type: "copy", text: "copied by antares" });
   assert.equal(await vscode.env.clipboard.readText(), "copied by antares");
+
+  // Images: a valid one goes through the real panel path; an invalid one is refused before any send.
+  const png = makeSolidPng(8, 8, [0, 0, 255]).toString("base64");
+  const userMessagesBefore = panel.testState.events.filter((e) => e.type === "userMessage").length;
+  panel.testState.rendered = undefined;
+  await panel.send("with an image", [{ mediaType: "image/png", base64Data: png, width: 8, height: 8 }]);
+  await waitFor("the image turn", () => (panel.testState as { rendered?: unknown }).rendered !== undefined, 30_000);
+  const withImage = panel.testState.events.filter((e) => e.type === "userMessage").pop();
+  assert.equal(panel.testState.events.filter((e) => e.type === "userMessage").length, userMessagesBefore + 1);
+  // The host accepted the image: it appends an "[Image #1]" marker to the text. (An ephemeral echo session
+  // reports no attachment metadata, so the marker is the evidence here.)
+  assert.match(withImage?.type === "userMessage" ? withImage.text : "", /\[Image #1\]/, "the host accepted the image");
+  const noticesBefore = panel.testState.events.filter((e) => e.type === "notice").length;
+  await panel.send("bad image", [{ mediaType: "image/bmp", base64Data: png }]);
+  assert.equal(panel.testState.events.filter((e) => e.type === "userMessage").length, userMessagesBefore + 1, "a refused image must not be sent");
+  assert.equal(panel.testState.events.filter((e) => e.type === "notice").length, noticesBefore + 1, "the refusal is shown to the user");
 
   // New chat restarts cleanly, and a second turn works on the new session.
   await panel.onMessage({ type: "newChat" });

@@ -60,3 +60,13 @@ Setup: `scripts/probe-model.ts`, the user's normal environment, `:read-only` wit
 - **`session/setModel`** takes `{commandId, sessionId, model: {modelId, providerId?, profileId?, displayLabel?}}`, answers `{status: "accepted"}`, and the host broadcasts `session/modelChanged` `{modelId, providerId, source: "user"}`. A later `model/list` with the session id flips `isActive`.
 - **`session/setReasoningEffort`** is accepted and broadcasts `session/reasoningEffortChanged` `{reasoningEffort, source: "user"}`. Antares does not use the session default: it sends `reasoningEffort` on `turn/start` only when the user picked one, so "Default" means the model's own default. The tiers offered are the row's `variants` (they differ per model; one model lacked `max`).
 - **Not observed:** what a turn does with a non-default effort, and a `session/start` refused for an unknown `modelId` (Antares retries without the model and says so; that path is covered only by a fake-host test).
+
+## Observed: image input (one real turn, about 42k tokens)
+
+Setup: `scripts/probe-image.ts`, the user's normal environment, `:read-only` with shell and writes disabled, an empty workspace, a generated 64x64 solid red PNG (168 bytes), prompt "Reply with exactly one word: the dominant colour of the attached image."
+
+- **The host accepts an `image` part and the model sees it:** it answered "red". The part was `{type: "image", mediaType: "image/png", base64Data, width: 64, height: 64}`, after the text part.
+- **The user message comes back with a marker and metadata only.** The item's `text` had `[Image #1]` appended, and `attachments` was `[{type: "image", mediaType, width, height, attachmentId}]`. The bytes are not returned, so a UI that wants to show the picture has to keep its own copy.
+- **An ephemeral host reports the marker but no metadata.** With the offline `echo` provider (`--no-session-log`) the text had `[Image #1]` and `attachments` was `[]`. Antares therefore counts images by the markers as well as by `attachments`.
+- **Cost:** 41,942 input tokens for the image turn versus 41,910 for a text-only turn, so a tiny image added about 32 tokens. Larger images were not measured.
+- **Not observed:** JPEG, GIF and WebP (they follow the contract but were not sent); the host's real size limits, which are not published. Antares' limits (6 images, 5 MB each, 15 MB total, long side scaled to at most 2048 px) are its own conservative choices.
