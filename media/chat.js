@@ -33,7 +33,7 @@
   const voiceStatus = $("voiceStatus");
 
   // Antares' own conservative limits (the host's are not published); the extension re-checks them.
-  const IMAGE = { allowed: ["image/png", "image/jpeg", "image/gif", "image/webp"], max: 6, maxBytes: 5 * 1024 * 1024, maxTotal: 15 * 1024 * 1024, maxSide: 2048 };
+  const IMAGE = { allowed: ["image/png", "image/jpeg", "image/gif", "image/webp"], max: 6, maxBytes: 5 * 1024 * 1024, maxTotal: 5.5 * 1024 * 1024, maxSide: 2048 };
 
   const COPY_ICON =
     '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor"/><path d="M10.5 3.5V3A1.5 1.5 0 0 0 9 1.5H3A1.5 1.5 0 0 0 1.5 3v6A1.5 1.5 0 0 0 3 10.5h.5" fill="none" stroke="currentColor"/></svg>';
@@ -1484,10 +1484,32 @@
       img.src = dataUrl;
     });
 
-  async function toAttachment(file) {
+  // The host refuses a request above about 8 MiB, so what is left of the budget decides how a picture is sent: untouched
+  // or scaled PNG when it fits, otherwise re-encoded as JPEG at smaller sizes until it does.
+  async function toAttachment(file, budget) {
     let dataUrl = await readDataUrl(file);
     const img = await loadImage(dataUrl);
     let { naturalWidth: width, naturalHeight: height } = img;
+    if (budget !== undefined && approxBytes(dataUrl.slice(dataUrl.indexOf(",") + 1)) > budget) {
+      const draw = (side, quality) => {
+        const scale = Math.min(1, side / Math.max(width, height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff"; // JPEG has no transparency
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        return { canvas, url: canvas.toDataURL("image/jpeg", quality) };
+      };
+      for (const [side, quality] of [[IMAGE.maxSide, 0.85], [1600, 0.8], [1280, 0.75], [1024, 0.7], [768, 0.6]]) {
+        const out = draw(side, quality);
+        const b64 = out.url.slice(out.url.indexOf(",") + 1);
+        if (approxBytes(b64) <= budget || side === 768) {
+          return { mediaType: "image/jpeg", base64Data: b64, width: out.canvas.width, height: out.canvas.height, dataUrl: out.url, bytes: approxBytes(b64) };
+        }
+      }
+    }
     // Large images are scaled down (PNG) before sending; small ones are sent untouched.
     if (Math.max(width, height) > IMAGE.maxSide) {
       const scale = IMAGE.maxSide / Math.max(width, height);
@@ -1516,10 +1538,10 @@
         continue;
       }
       try {
-        const att = await toAttachment(file);
-        const total = state.attachments.reduce((n, a) => n + a.bytes, 0) + att.bytes;
+        const used = state.attachments.reduce((n, a) => n + a.bytes, 0);
+        const att = await toAttachment(file, IMAGE.maxTotal - used);
         if (att.bytes > IMAGE.maxBytes) addNotice("warning", "That image is too large (" + (att.bytes / 1048576).toFixed(1) + " MB; the limit is " + IMAGE.maxBytes / 1048576 + " MB).");
-        else if (total > IMAGE.maxTotal) addNotice("warning", "The images together are too large (the limit is " + IMAGE.maxTotal / 1048576 + " MB).");
+        else if (used + att.bytes > IMAGE.maxTotal) addNotice("warning", "The images together are too large (the limit is " + IMAGE.maxTotal / 1048576 + " MB). Remove one or send them in separate messages.");
         else state.attachments.push(att);
       } catch {
         addNotice("warning", (file.name || "That file") + " could not be read as an image.");
@@ -1528,6 +1550,7 @@
     renderAttachments();
   }
 
+  window.__antaresAttachmentBytes = () => state.attachments.reduce((n, a) => n + a.bytes, 0); // read by the real-window test
   function renderAttachments() {
     attachmentsEl.replaceChildren();
     attachmentsEl.hidden = state.attachments.length === 0;

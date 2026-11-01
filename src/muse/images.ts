@@ -14,7 +14,8 @@ export interface ImageInput {
 export const ALLOWED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
 export const MAX_IMAGES = 6;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-export const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024;
+/** The host refuses a request frame above about 8 MiB (measured: 8 MiB passes, 10 MiB is refused with -32002); base64 adds a third. */
+export const MAX_TOTAL_IMAGE_BYTES = 5.5 * 1024 * 1024;
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 

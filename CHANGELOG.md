@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- **Fix: "Could not send the message: turn/start: frame exceeds the inbound limit (code -32002)" when several pictures are attached.** The host refuses a request above about 8 MiB (measured with `scripts/probe-frame-limit.ts`: 8 MiB passes, 10 MiB is refused) and Antares allowed 15 MB of pictures, which grow by a third as base64. The total is now 5.5 MB; a picture that does not fit in what is left is re-encoded as JPEG at a smaller size automatically, and an oversized request now gets a plain explanation.
+
 ## 0.1.3
 
 - **Fix: the chat keeps scrolling down while the agent works.** Following used to switch itself off whenever the scroll position moved up, which also happens when the content shrinks for a moment (a message repainted, a card collapsing, the footer resizing), so the user had to keep pressing the jump-to-latest arrow. Now following stops only on a real user action (wheel up, keys, touch, dragging the scrollbar) and resumes when the bottom is reached; heights that change without a DOM change (images, footer) also keep the latest output in view.

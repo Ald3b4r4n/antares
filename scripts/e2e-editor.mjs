@@ -729,6 +729,25 @@ try {
   check("the image is sent and shown as a chip with its thumbnail", sent.chips === 1 && sent.thumbOk, JSON.stringify(sent));
   await shot("08-image-sent");
 
+  // Big pictures (noisy 2000 px screenshots, several MB each as PNG) are re-encoded so the whole message stays under
+  // what the host accepts in one request.
+  await evalWeb(`(async () => {
+    for (let n = 0; n < 4; n++) {
+      const c = d.createElement('canvas'); c.width = 2000; c.height = 1500; const g = c.getContext('2d');
+      const px = g.createImageData(2000, 1500); for (let i = 0; i < px.data.length; i += 4) { px.data[i] = Math.random() * 255; px.data[i + 1] = Math.random() * 255; px.data[i + 2] = Math.random() * 255; px.data[i + 3] = 255; }
+      g.putImageData(px, 0, 0);
+      const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+      const dt = new w.DataTransfer(); dt.items.add(new w.File([blob], 'big' + n + '.png', { type: 'image/png' }));
+      d.getElementById('input').dispatchEvent(new w.ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 1500));
+    }
+    return true; })()`);
+  await waitFor("the big images", () => evalWeb("d.querySelectorAll('#attachments .thumb').length >= 3"), 30000);
+  const big = await evalWeb("({ thumbs: d.querySelectorAll('#attachments .thumb').length, notices: [...d.querySelectorAll('.notice')].slice(-2).map(n => n.textContent.slice(0, 90)) })");
+  const bigBytes = await evalWeb("w.__antaresAttachmentBytes ? w.__antaresAttachmentBytes() : -1");
+  check("large pictures are re-encoded to fit the host's request limit", big.thumbs >= 3 && (bigBytes === -1 || bigBytes <= 5.5 * 1048576), JSON.stringify({ ...big, bigBytes }));
+  await evalWeb("(() => { let b; while ((b = d.querySelector('#attachments .thumb-remove'))) b.click(); return true; })()");
+
   // The composer's "+" menu, in the real window: files and photos, a folder, slash commands, connectors and
   // plugins. The host-side dialogs are replaced by `antares.dev.picks` (a native file dialog is not in the
   // DOM). The echo provider answers, so this costs nothing; the skill list, the connector list and the

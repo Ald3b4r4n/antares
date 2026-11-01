@@ -69,7 +69,7 @@ Setup: `scripts/probe-image.ts`, the user's normal environment, `:read-only` wit
 - **The user message comes back with a marker and metadata only.** The item's `text` had `[Image #1]` appended, and `attachments` was `[{type: "image", mediaType, width, height, attachmentId}]`. The bytes are not returned, so a UI that wants to show the picture has to keep its own copy.
 - **An ephemeral host reports the marker but no metadata.** With the offline `echo` provider (`--no-session-log`) the text had `[Image #1]` and `attachments` was `[]`. Antares therefore counts images by the markers as well as by `attachments`.
 - **Cost:** 41,942 input tokens for the image turn versus 41,910 for a text-only turn, so a tiny image added about 32 tokens. Larger images were not measured.
-- **Not observed:** JPEG, GIF and WebP (they follow the contract but were not sent); the host's real size limits, which are not published. Antares' limits (6 images, 5 MB each, 15 MB total, long side scaled to at most 2048 px) are its own conservative choices.
+- **Not observed:** JPEG, GIF and WebP (they follow the contract but were not sent); the host's real size limits, which are not published. Antares' limits (6 images, 5 MB each, 5.5 MB total (the host refuses requests above about 8 MiB; larger pictures are re-encoded as JPEG to fit), long side scaled to at most 2048 px) are its own conservative choices.
 
 ## Observed: subscription usage (no model call, no session)
 

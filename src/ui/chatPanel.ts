@@ -550,7 +550,11 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     try {
       await session.send(text, checked.images, mode ? { ifBusy: mode } : {});
     } catch (error) {
-      this.notice("error", `Could not send the message: ${error instanceof Error ? error.message : String(error)}`);
+      const reason = error instanceof Error ? error.message : String(error);
+      const tooBig = /exceeds the inbound limit|-32002/.test(reason);
+      this.notice("error", tooBig
+        ? "Could not send the message: it is bigger than Muse accepts in one request (about 8 MB). Remove some images or send them in separate messages."
+        : `Could not send the message: ${reason}`);
     }
   }
 
