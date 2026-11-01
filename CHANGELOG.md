@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- **Fix: the chat keeps scrolling down while the agent works.** Following used to switch itself off whenever the scroll position moved up, which also happens when the content shrinks for a moment (a message repainted, a card collapsing, the footer resizing), so the user had to keep pressing the jump-to-latest arrow. Now following stops only on a real user action (wheel up, keys, touch, dragging the scrollbar) and resumes when the bottom is reached; heights that change without a DOM change (images, footer) also keep the latest output in view.
+
 ## 0.1.2
 
 - The banner now credits the author, **Antonio Rafael Souza Cruz de Noronha**, with a link to https://www.antoniorafael.com.br/ (also in the README and in the extension's author field).

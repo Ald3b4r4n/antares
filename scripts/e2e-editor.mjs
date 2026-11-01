@@ -303,6 +303,31 @@ try {
     check("Open file on a file that no longer exists explains it in an editor notification, not only in the hidden chat", true);
     await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
 
+    // A real answer streams token by token: the message is repainted on every token (its height briefly shrinks and
+    // grows) and tool cards are rebuilt as they finish. The view must keep following through all of it.
+    await evalWeb(`(async () => {
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      w.postMessage({ type: 'event', event: { type: 'turnStarted', turnId: 'stream-1' } }, '*');
+      w.postMessage({ type: 'event', event: { type: 'assistantStarted', itemId: 'stream-msg' } }, '*');
+      for (let i = 0; i < 220; i++) {
+        w.postMessage({ type: 'event', event: { type: 'assistantDelta', itemId: 'stream-msg', delta: 'word' + i + ' with **bold** and a long tail of words ' + (i % 9 === 0 ? '\\n\\n' : '') } }, '*');
+        if (i % 25 === 0) {
+          w.postMessage({ type: 'event', event: { type: 'toolCall', itemId: 'stream-tool-' + i, tool: 'powershell', summary: 'step ' + i, status: 'inProgress', held: false } }, '*');
+          await sleep(15);
+          w.postMessage({ type: 'event', event: { type: 'toolCall', itemId: 'stream-tool-' + i, tool: 'powershell', summary: 'step ' + i, status: 'completed', held: false, output: 'line one\\nline two\\nline three' } }, '*');
+        }
+        if (i % 30 === 0) {
+          let pad = d.getElementById('e2e-pad');
+          if (!pad) { pad = d.createElement('div'); pad.id = 'e2e-pad'; d.querySelector('footer').prepend(pad); }
+          pad.style.height = pad.style.height === '70px' ? '0px' : '70px';
+        }
+        await sleep(8);
+      }
+      return true; })()`);
+    const streamed = await evalWeb("(() => { const m = d.getElementById('messages'); return { gap: m.scrollHeight - m.scrollTop - m.clientHeight, jump: !d.getElementById('jumpBottom').hidden }; })()");
+    check("while a message streams token by token and tool cards are rebuilt, the view keeps following (no jump button), even while the footer changes height", streamed.gap < 5 && !streamed.jump, JSON.stringify(streamed));
+    await evalWeb("(() => { const p = d.getElementById('e2e-pad'); if (p) p.remove(); return true; })()");
+
     // Scrolling: the view follows growing output, stops when the user scrolls up, and offers a button back down.
     const postMsgs = (from, to) => evalWeb(`(() => { for (let i = ${from}; i < ${to}; i++) w.postMessage({ type: 'event', event: { type: 'assistantCompleted', itemId: 'scroll-' + i, text: 'Scroll line ' + i + '\\n\\nMore text so each message is a few lines tall, number ' + i + '.' } }, '*'); return true; })()`);
     const scrollState = () => evalWeb("(() => { const m = d.getElementById('messages'); return { gap: m.scrollHeight - m.scrollTop - m.clientHeight, top: m.scrollTop, tall: m.scrollHeight > m.clientHeight + 200, jump: !d.getElementById('jumpBottom').hidden }; })()");

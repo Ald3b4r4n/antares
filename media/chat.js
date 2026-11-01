@@ -137,21 +137,31 @@
     follow = on;
     jump.hidden = on;
   }
-  // Only a move UP leaves the bottom: growing content or our own scrolling never lowers scrollTop, whereas a drag of the
-  // scrollbar, the wheel or the keys do. Reaching the bottom again (by any means) resumes following.
-  let lastTop = 0;
+  // Following stops only when the USER asks for it (wheel up, keys, touch, dragging the scrollbar). Scroll events caused by
+  // the content itself (a message repainted shorter for a moment, a card collapsing, the footer resizing) never count:
+  // the browser clamps scrollTop in those cases and it looks like an upward scroll. Reaching the bottom resumes following.
+  let dragging = false;
   messages.addEventListener("scroll", () => {
-    const up = messages.scrollTop < lastTop - 2;
-    lastTop = messages.scrollTop;
-    if (up) setFollow(false);
-    else if (atBottom()) setFollow(true);
+    if (atBottom()) setFollow(true);
+    else if (dragging) setFollow(false);
   });
+  messages.addEventListener("pointerdown", (ev) => {
+    // A press on the scrollbar track (right of the content box) starts a drag.
+    if (ev.offsetX >= messages.clientWidth) dragging = true;
+  });
+  window.addEventListener("pointerup", () => { dragging = false; });
   messages.addEventListener("wheel", (ev) => {
     if (ev.deltaY < 0) setFollow(false); // reading upwards: stop following before the next token arrives
   }, { passive: true });
   messages.addEventListener("keydown", (ev) => {
     if (ev.key === "ArrowUp" || ev.key === "PageUp" || ev.key === "Home") setFollow(false);
   });
+  let touchY = 0;
+  messages.addEventListener("touchstart", (ev) => { touchY = ev.touches[0].clientY; }, { passive: true });
+  messages.addEventListener("touchmove", (ev) => {
+    if (ev.touches[0].clientY > touchY + 4) setFollow(false); // finger moving down = reading earlier output
+    touchY = ev.touches[0].clientY;
+  }, { passive: true });
   jump.addEventListener("click", () => {
     setFollow(true);
     scrollDown();
@@ -167,6 +177,13 @@
       if (follow) scrollDown();
     });
   }).observe(messages, { childList: true, subtree: true, characterData: true });
+  // Heights that change without a DOM mutation (images loading, the composer growing) also keep the latest output in view.
+  if (typeof ResizeObserver === "function") {
+    const ro = new ResizeObserver(() => { if (follow) scrollDown(); });
+    ro.observe(messages);
+    const content = new MutationObserver(() => { for (const c of messages.children) ro.observe(c); });
+    content.observe(messages, { childList: true });
+  }
   // The button sits just above the composer, wherever the footer's height ends up.
   const footerEl = document.querySelector("footer");
   const placeJump = () => {

@@ -15,10 +15,10 @@ O Windows é a plataforma testada. No macOS e no Linux o chat pode funcionar, ma
 
 ## 2. Instalar
 
-1. Baixe o **`antares-0.1.2.vsix`** na [página de Releases](https://github.com/Ald3b4r4n/antares/releases) (é uma pré-release).
+1. Baixe o **`antares-0.1.3.vsix`** na [página de Releases](https://github.com/Ald3b4r4n/antares/releases) (é uma pré-release).
 2. Instale de um destes jeitos:
    - **No editor:** abra a vista de Extensões, clique no menu **`...`** no topo, escolha **Instalar do VSIX...** e selecione o arquivo.
-   - **Pelo terminal:** `code --install-extension antares-0.1.2.vsix` (troque `code` pelo comando do seu editor, por exemplo `antigravity-ide`, que fica na pasta `bin` da instalação do editor).
+   - **Pelo terminal:** `code --install-extension antares-0.1.3.vsix` (troque `code` pelo comando do seu editor, por exemplo `antigravity-ide`, que fica na pasta `bin` da instalação do editor).
 3. **Recarregue a janela:** `Ctrl+Shift+P` e *Developer: Reload Window*.
 
 Para compilar você mesmo: `git clone https://github.com/Ald3b4r4n/antares`, depois, em `muse-extension`, rode `npm install`, `npm run build`, `npm run package` e instale o `.vsix` gerado (Node.js 22+).
@@ -107,7 +107,7 @@ Trocar de modo mantém a conversa. Qualquer coisa acima de Plan pede confirmaç�
 
 A Antares inicia o `muse serve` oficial e conversa com ele localmente. Não lê o seu `auth.json`, não chama o endpoint que gera chaves e não chama a API do modelo por conta própria. Os números de uso vêm do Muse. O áudio da voz fica na sua máquina. A Antares não envia nada a servidor próprio (ela não tem nenhum).
 
-## 10. O que ainda falta na 0.1.2
+## 10. O que ainda falta na 0.1.3
 
 - **Entrada de vídeo** (não construída; não deu para testar de ponta a ponta).
 - **Worktrees** (a própria checagem de git do host expirou na máquina de teste).
