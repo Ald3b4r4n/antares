@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- The banner now credits the author, **Antonio Rafael Souza Cruz de Noronha**, with a link to https://www.antoniorafael.com.br/ (also in the README and in the extension's author field).
+
 ## 0.1.1
 
 - **Fix: "Open diff" and "Open file" did nothing for a file the agent had deleted** (typically a scratch file it created and then removed). The failure was silent because the chat's notices sit behind the Changes panel and the diff views. Now an editor notification says the file no longer exists, and **Open diff** still shows what the agent wrote when the edit created the file ("as the agent wrote it; the file no longer exists").

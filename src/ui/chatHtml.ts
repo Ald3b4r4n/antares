@@ -1,4 +1,4 @@
-import { ANTARES_ASCII, ANTARES_TAGLINE } from "./banner.ts";
+import { ANTARES_ASCII, ANTARES_AUTHOR, ANTARES_TAGLINE } from "./banner.ts";
 
 const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -30,7 +30,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
 <button id="jumpBottom" class="jump-bottom" hidden title="Scroll to the latest message" aria-label="Scroll to the latest message">\u2193</button>
 <div id="messages">
   <div class="hero"><img src="${mediaUri("antares.svg")}" alt="">
-    <div><pre class="logo">${escapeHtml(ANTARES_ASCII)}</pre><p class="tag">${escapeHtml(ANTARES_TAGLINE)}</p></div></div>
+    <div><pre class="logo">${escapeHtml(ANTARES_ASCII)}</pre><p class="tag">${escapeHtml(ANTARES_TAGLINE)} by <a id="authorLink" href="${escapeHtml(ANTARES_AUTHOR.url)}" title="${escapeHtml(ANTARES_AUTHOR.url)}">${escapeHtml(ANTARES_AUTHOR.name)}</a></p></div></div>
   <p class="hint" id="hint">Enter sends · Shift+Enter adds a line · / for skills · Ctrl+U adds files · paste or drop images.</p>
 </div>
 <section id="historyPanel" class="overlay" hidden aria-label="Session history">

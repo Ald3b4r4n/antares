@@ -255,6 +255,8 @@ try {
   check("the mode selector lists Auto, Manual (unavailable), Accept edits, Plan and Bypass, starting in Plan", JSON.stringify(dom.modes) === JSON.stringify(["auto", "manual(unavailable)", "acceptEdits", "plan", "bypass"]) && dom.modeLabel === "Plan", JSON.stringify({ modes: dom.modes, label: dom.modeLabel }));
   check("model and effort controls exist", dom.modelControls);
   check("page styles loaded", dom.cssLoaded);
+  const credit = await evalWeb("({ text: d.querySelector('.hero .tag').textContent, href: d.getElementById('authorLink')?.getAttribute('href') })");
+  check("the banner credits the author with a link to their site", /an open interface for Muse Code by Antonio Rafael Souza Cruz de Noronha$/.test(credit.text) && credit.href === "https://www.antoniorafael.com.br/", JSON.stringify(credit));
 
   if (!MODES && !REAL && !IMPORT && !PLUGINS) {
     // Tool presentation: a checklist instead of JSON, and a file edit as a diff with buttons to open VS Code's diff.
@@ -267,7 +269,7 @@ try {
     await evalWeb("(() => { const p = [...d.querySelectorAll('.tool')].find(c => c.querySelector('.tool-summary')?.textContent === 'plan.txt'); [...p.querySelectorAll('.patch-head button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
     const diffTab = await waitFor("VS Code's diff editor", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
     check("Open diff opens VS Code's diff editor on the file before and after the edit", /plan\.txt \(before/.test(diffTab), JSON.stringify(diffTab));
-    await waitFor("the diff editor to paint its lines", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 0 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
+    await waitFor("the diff editor to paint its lines", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 1 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 1"), 15000).catch(() => undefined);
     const sides = await evalPage("(() => ({ original: [...document.querySelectorAll('.monaco-diff-editor .editor.original .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')), modified: [...document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')) }))()");
     check("the before side was rebuilt from the patch (beta) and the after side is the file (BETA)", sides.original.some((l) => /beta/.test(l)) && !sides.original.some((l) => /BETA/.test(l)) && sides.modified.some((l) => /BETA/.test(l)), JSON.stringify(sides));
     await shot("27-diff-editor");
@@ -282,7 +284,7 @@ try {
     await evalWeb("(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => /series.txt/.test(x.textContent)); [...li.querySelectorAll('button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
     const seriesTab = await waitFor("the cumulative diff editor", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before this chat/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
     check("Open diff on a file edited twice compares it before the first edit with now", /series\.txt \(before this chat .* now, 2 edits\)/.test(seriesTab), JSON.stringify(seriesTab));
-    await waitFor("the cumulative diff to paint", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 0 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
+    await waitFor("the cumulative diff to paint", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.original .view-line').length > 1 && document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 1"), 15000).catch(() => undefined);
     const seriesSides = await evalPage("(() => ({ original: [...document.querySelectorAll('.monaco-diff-editor .editor.original .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')), modified: [...document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')) }))()");
     check("the before side holds the original lines (two, no four) and the after side the final ones (TWO, four)", seriesSides.original.some((l) => /two/.test(l)) && !seriesSides.original.some((l) => /four|TWO/.test(l)) && seriesSides.modified.some((l) => /TWO/.test(l)) && seriesSides.modified.some((l) => /four/.test(l)), JSON.stringify(seriesSides));
     await shot("35-cumulative-diff");
@@ -292,7 +294,7 @@ try {
     await evalWeb("(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => /gone.txt/.test(x.textContent)); [...li.querySelectorAll('button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
     const goneTab = await waitFor("the diff of the deleted file", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /no longer exists/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
     check("Open diff on a file that no longer exists shows what the agent wrote and says the file is gone", /gone\.txt \(as the agent wrote it; the file no longer exists\)/.test(goneTab), JSON.stringify(goneTab));
-    await waitFor("the deleted file's diff to paint", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
+    await waitFor("the deleted file's diff to paint", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 1"), 15000).catch(() => undefined);
     const goneSides = await evalPage("(() => ({ modified: [...document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')) }))()");
     check("the written lines are shown", goneSides.modified.some((l) => /ghost line one/.test(l)) && goneSides.modified.some((l) => /ghost line two/.test(l)), JSON.stringify(goneSides));
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /no longer exists/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");

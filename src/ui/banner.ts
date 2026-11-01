@@ -26,3 +26,6 @@ export function blockText(word: string): string {
 export const ANTARES_ASCII = blockText("ANTARES");
 
 export const ANTARES_TAGLINE = "α Scorpii · an open interface for Muse Code";
+
+/** The author, credited under the banner with a link to their site. */
+export const ANTARES_AUTHOR = { name: "Antonio Rafael Souza Cruz de Noronha", url: "https://www.antoniorafael.com.br/" };

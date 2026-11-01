@@ -36,6 +36,8 @@ button { font: inherit; color: inherit; }
 .hero img { width: 64px; height: 64px; flex: none; }
 pre.logo { font-family: var(--mono); color: var(--antares); margin: 0; line-height: 1; font-size: min(13px, 3.1vw); letter-spacing: 0; }
 .tag { margin: 6px 0 0; color: var(--muted); }
+.tag a { color: var(--antares); text-decoration: none; }
+.tag a:hover { text-decoration: underline; }
 .hint { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
 
 .msg { margin: 0 0 16px; max-width: 100%; }
