@@ -5,7 +5,7 @@ import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
 import { cycleMode, DEFAULT_MODE, modeById, modeOfProfile, modeRows } from "../muse/modes.ts";
 import { canonicalPath, imageTypeFor, mentionFor, rootsFor } from "../muse/composer.ts";
-import { countChanges, normalizeHostPath, readPatch, relativeToRoots, reversePatch, reverseSeries, type PatchFile } from "../muse/patches.ts";
+import { countChanges, createdContent, normalizeHostPath, readPatch, relativeToRoots, reversePatch, reverseSeries, type PatchFile } from "../muse/patches.ts";
 import type { OriginalProvider } from "./originalProvider.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
 import { loadWorkspaceImage } from "../muse/localImages.ts";
@@ -598,6 +598,15 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     this.post({ type: "changes", files: this.changedFiles() });
   }
 
+  /**
+   * A message the user will actually see. The chat's own notices sit behind the Changes panel and the diff views, so
+   * anything that explains why a button did nothing is also shown by the editor.
+   */
+  private tell(level: "info" | "warning", text: string): void {
+    this.notice(level, text);
+    void (level === "info" ? vscode.window.showInformationMessage(`Antares: ${text}`) : vscode.window.showWarningMessage(`Antares: ${text}`));
+  }
+
   /** Opens a changed file, or one diff from before the first edit of this chat to the file as it is now. */
   private async openChanged(path: string, diff: boolean): Promise<void> {
     const key = normalizeHostPath(canonicalPath(path)).toLowerCase();
@@ -609,10 +618,23 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     edits.sort((a, b) => a.seq - b.seq);
     const disk = normalizeHostPath(canonicalPath(path));
     if (relativeToRoots(disk, this.openableRoots()) === undefined) {
-      this.notice("warning", "That file is outside this chat's folders, so Antares does not open it from here.");
+      this.tell("warning", "That file is outside this chat's folders, so Antares does not open it from here.");
       return;
     }
     const uri = vscode.Uri.file(disk);
+    // The agent may have deleted the file after writing it (a scratch file, say). Say so, and for a file the chat
+    // created, still show what was written.
+    const exists = await stat(disk).then(() => true, () => false);
+    if (!exists) {
+      const written = edits.length === 1 ? createdContent(edits[0]!.hunks) : undefined;
+      const originals = ChatPanel.originals;
+      if (diff && written !== undefined && originals) {
+        await vscode.commands.executeCommand("vscode.diff", originals.add(basename(disk), ""), originals.add(basename(disk), written), `${basename(disk)} (as the agent wrote it; the file no longer exists)`);
+        return;
+      }
+      this.tell("info", `${basename(disk)} no longer exists: it was deleted or moved after the agent changed it.`);
+      return;
+    }
     try {
       if (diff) {
         const before = reverseSeries(await readFile(disk, "utf8"), edits.map((e) => e.hunks));
@@ -621,11 +643,11 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
           await vscode.commands.executeCommand("vscode.diff", originals.add(basename(disk), before), uri, `${basename(disk)} (before this chat ↔ now, ${edits.length} edit${edits.length === 1 ? "" : "s"})`);
           return;
         }
-        this.notice("info", "The file changed in a way the chat's edits do not explain, so its version before them cannot be rebuilt. Showing the file itself.");
+        this.tell("info", "The file changed in a way the chat's edits do not explain, so its version before them cannot be rebuilt. Showing the file itself.");
       }
       await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
     } catch (error) {
-      this.notice("warning", `Could not open the file: ${error instanceof Error ? error.message : String(error)}`);
+      this.tell("warning", `Could not open the file: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -657,10 +679,21 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     if (!file) return;
     const disk = normalizeHostPath(canonicalPath(file.path));
     if (relativeToRoots(disk, this.openableRoots()) === undefined) {
-      this.notice("warning", "That file is outside this chat's folders, so Antares does not open it from here.");
+      this.tell("warning", "That file is outside this chat's folders, so Antares does not open it from here.");
       return;
     }
     const uri = vscode.Uri.file(disk);
+    // A scratch file the agent wrote and then deleted: say so, and still show what it wrote when this edit created it.
+    if (!(await stat(disk).then(() => true, () => false))) {
+      const written = createdContent(file.hunks);
+      const originals = ChatPanel.originals;
+      if (diff && written !== undefined && originals) {
+        await vscode.commands.executeCommand("vscode.diff", originals.add(basename(disk), ""), originals.add(basename(disk), written), `${basename(disk)} (as the agent wrote it; the file no longer exists)`);
+        return;
+      }
+      this.tell("info", `${basename(disk)} no longer exists: it was deleted or moved after the agent changed it.`);
+      return;
+    }
     try {
       if (diff) {
         const current = await readFile(disk, "utf8");
@@ -670,11 +703,11 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
           await vscode.commands.executeCommand("vscode.diff", originals.add(basename(disk), before), uri, `${basename(disk)} (before ↔ after this edit)`);
           return;
         }
-        this.notice("info", "The file changed after this edit, so its earlier version cannot be rebuilt. Showing the file itself.");
+        this.tell("info", "The file changed after this edit, so its earlier version cannot be rebuilt. Showing the file itself.");
       }
       await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: true });
     } catch (error) {
-      this.notice("warning", `Could not open the file: ${error instanceof Error ? error.message : String(error)}`);
+      this.tell("warning", `Could not open the file: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

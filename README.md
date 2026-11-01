@@ -20,7 +20,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: release candidate 0.1.0.** Chat with streaming, tool cards, approvals with the host's own choices, five permission modes, voice input (Windows), a composer "+" menu (files, folders, skills, connectors, plugins, queue), file-edit diffs with a cumulative Changes view, images from the workspace, and Computer Use approval cards work and were checked in VS Code and Antigravity IDE. Several things could not be verified with a real model, a real browser server, a real OAuth provider or a working sandbox on the test machine; every such limit is listed in the [roadmap](#roadmap) and in the docs.
+> **Status: release candidate 0.1.1.** Chat with streaming, tool cards, approvals with the host's own choices, five permission modes, voice input (Windows), a composer "+" menu (files, folders, skills, connectors, plugins, queue), file-edit diffs with a cumulative Changes view, images from the workspace, and Computer Use approval cards work and were checked in VS Code and Antigravity IDE. Several things could not be verified with a real model, a real browser server, a real OAuth provider or a working sandbox on the test machine; every such limit is listed in the [roadmap](#roadmap) and in the docs.
 
 > **Having trouble?** "sandbox unavailable", shell commands failing: see [docs/SANDBOX.md](docs/SANDBOX.md). Voice setup: [docs/VOICE.md](docs/VOICE.md). Browser and app control: [docs/BROWSER.md](docs/BROWSER.md). What the protocol does and does not allow, as measured: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md).
 
@@ -73,17 +73,17 @@ Known limits worth stating up front:
 Full guide: **[docs/INSTALL.md](docs/INSTALL.md)** (English) · **[docs/INSTALL.pt-BR.md](docs/INSTALL.pt-BR.md)** (Português).
 
 1. **Have Muse Code installed and logged in** (`muse --version`, then `muse login` once). Open your project folder in VS Code or Antigravity IDE.
-2. **Download `antares-0.1.0.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases).
-3. **Install it:** Extensions view, the `...` menu, *Install from VSIX...* (or `code --install-extension antares-0.1.0.vsix`), then *Developer: Reload Window*.
+2. **Download `antares-0.1.1.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases).
+3. **Install it:** Extensions view, the `...` menu, *Install from VSIX...* (or `code --install-extension antares-0.1.1.vsix`), then *Developer: Reload Window*.
 4. **Open it:** click the Antares icon in the activity bar, or `Ctrl+Shift+P`, then *Antares: Open*. If it says "Muse executable not found", set `antares.musePath`.
 5. **Optional voice:** `Ctrl+Shift+P`, then *Antares: Set up local voice* (about 450 MB, asks first, runs on your computer).
 6. **Use it:** pick a mode next to the model (Plan reads only; Accept edits edits files; Bypass runs commands with no sandbox), use `+` to add files, folders, skills and more, and watch the footer for your subscription usage.
 
 If shell commands fail with "sandbox unavailable", read [docs/SANDBOX.md](docs/SANDBOX.md).
 
-### What is still missing in 0.1.0
+### What is still missing in 0.1.1
 
-Video input, worktrees, voice recording outside Windows, an embedded terminal, adding MCP servers from the UI, publishing to Open VSX and the Marketplace, and verification with real services (connector OAuth, plugins with hooks, the Auto-review reviewer, a real browser server). Each has a reason in [docs/INSTALL.md](docs/INSTALL.md#10-what-is-still-missing-in-010) and in the [roadmap](#roadmap).
+Video input, worktrees, voice recording outside Windows, an embedded terminal, adding MCP servers from the UI, publishing to Open VSX and the Marketplace, and verification with real services (connector OAuth, plugins with hooks, the Auto-review reviewer, a real browser server). Each has a reason in [docs/INSTALL.md](docs/INSTALL.md#10-what-is-still-missing-in-011) and in the [roadmap](#roadmap).
 
 ## Requirements
 

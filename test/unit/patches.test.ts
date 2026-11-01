@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { mapNotification } from "../../src/muse/events.ts";
-import { countChanges, normalizeHostPath, parsePatch, patchRefAllowed, readPatch, relativeToRoots, reversePatch, reverseSeries } from "../../src/muse/patches.ts";
+import { countChanges, normalizeHostPath, parsePatch, patchRefAllowed, readPatch, relativeToRoots, reversePatch, reverseSeries, createdContent } from "../../src/muse/patches.ts";
 
 const observedWrite = { files: [{ path: "\\\\?\\C:\\work\\plan.txt", hunks: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 3, lines: ["+alpha", "+beta", "+gamma"] }] }] };
 const observedEdit = { files: [{ path: "\\\\?\\C:\\work\\plan.txt", hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" alpha", "-beta", "+BETA", " gamma"] }] }] };
@@ -165,4 +165,12 @@ test("series: a file that changed outside the chat, or an edit that is missing, 
   assert.equal(reverseSeries("one\nTWO\nthree\nfour\nfive\n", [e2, e3]), "one\ntwo\nthree\nfive\n", "a change elsewhere in the file is kept: only the chat's edits are undone");
   assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e1, e3]), undefined, "the middle edit is missing: undoing e3 then e1 does not fit");
   assert.equal(reverseSeries("one\nTWO\nthree\nfour\n", [e3, e2]), "one\ntwo\nthree\n", "edits to different lines commute, so the order does not change the answer");
+});
+
+test("created content: what an edit that created the file wrote, for a file that was deleted afterwards", () => {
+  assert.equal(createdContent(parsePatch(JSON.stringify(observedWrite))[0]!.hunks), "alpha\nbeta\ngamma\n");
+  assert.equal(createdContent(e1), "one\ntwo\nthree\n");
+  assert.equal(createdContent(parsePatch(JSON.stringify(observedEdit))[0]!.hunks), undefined, "an edit of an existing file is not a creation");
+  assert.equal(createdContent([{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 2, lines: ["-a", "+a", "+b"] }]), undefined, "removing a line means it was not a creation");
+  assert.equal(createdContent([]), undefined);
 });

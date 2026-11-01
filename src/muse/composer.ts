@@ -4,7 +4,7 @@
  * `@path` mention. No I/O here, so it is all unit-tested.
  */
 import { realpathSync } from "node:fs";
-import { isAbsolute, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -174,7 +174,13 @@ export function canonicalPath(path: string): string {
   try {
     real = realpathSync.native(path);
   } catch {
-    return path;
+    // The file itself may be gone (a scratch file the agent deleted): resolve the folder it was in, so a short or
+    // differently-cased spelling of the folder still matches the workspace roots.
+    try {
+      real = join(realpathSync.native(dirname(path)), basename(path));
+    } catch {
+      return path;
+    }
   }
   if (process.platform !== "win32" || real.startsWith("\\\\?\\")) return real;
   return real.startsWith("\\\\") ? `\\\\?\\UNC\\${real.slice(2)}` : `\\\\?\\${real}`;

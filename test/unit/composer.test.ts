@@ -95,7 +95,9 @@ test("roots: the host wants canonical paths (long names, extended-length prefix 
       assert.ok(canonical.startsWith("/"));
     }
     const missing = join(dir, "does-not-exist");
-    assert.equal(canonicalPath(missing), missing, "a missing path is returned unchanged");
+    assert.equal(canonicalPath(missing), join(canonicalPath(dir), "does-not-exist"), "a missing file is placed in its canonical folder");
+    const nowhere = join(dir, "no-such-folder", "does-not-exist");
+    assert.equal(canonicalPath(nowhere), nowhere, "when the folder is gone too, the path is returned unchanged");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

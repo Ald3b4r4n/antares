@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- **Fix: "Open diff" and "Open file" did nothing for a file the agent had deleted** (typically a scratch file it created and then removed). The failure was silent because the chat's notices sit behind the Changes panel and the diff views. Now an editor notification says the file no longer exists, and **Open diff** still shows what the agent wrote when the edit created the file ("as the agent wrote it; the file no longer exists").
+- Fix: the short (8.3) spelling of a folder is now resolved for a file that no longer exists, so it matches the workspace folders (it used to show a full path and no buttons).
+- **Follows the output** with a jump-to-latest arrow, **Copy at the end of the turn**, **failed commands show their output**, and the Bypass footer no longer warns about the sandbox (all listed below under 0.1.0 as they were built after the first release candidate).
+
 ## 0.1.0 — release candidate
 
 Everything below under "Unreleased" is part of this build. In one place:

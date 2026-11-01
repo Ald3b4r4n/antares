@@ -137,6 +137,15 @@ export function reverseSeries(current: string, edits: readonly (readonly PatchHu
   return text;
 }
 
+/**
+ * What a file was given when one edit created it: every hunk adds lines and removes none (so the file started empty
+ * or new). Used to show what the agent wrote when the file has since been deleted. Undefined for any other edit.
+ */
+export function createdContent(hunks: readonly PatchHunk[]): string | undefined {
+  if (hunks.length === 0 || hunks.some((h) => h.oldLines !== 0 || h.lines.some((l) => l[0] !== "+"))) return undefined;
+  return hunks.flatMap((h) => h.lines.map((l) => l.slice(1))).join("\n") + "\n";
+}
+
 /** Added and removed line counts of one file's hunks. */
 export function countChanges(file: PatchFile): { added: number; removed: number } {
   let added = 0;

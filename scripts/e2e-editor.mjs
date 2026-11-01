@@ -59,7 +59,10 @@ const seriesA = join(work, "tool-outputs", "t2", "call_2-tool_patch.json");
 const seriesB = join(work, "tool-outputs", "t3", "call_3-tool_patch.json");
 writeFileSync(seriesA, JSON.stringify({ files: [{ path: join(workspace, "series.txt"), hunks: [{ oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, lines: [" one", "-two", "+TWO", " three"] }] }] }));
 writeFileSync(seriesB, JSON.stringify({ files: [{ path: join(workspace, "series.txt"), hunks: [{ oldStart: 3, oldLines: 1, newStart: 3, newLines: 2, lines: [" three", "+four"] }] }] }));
-writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.dev.patchSeries": [seriesA, seriesB], "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+mkdirSync(join(work, "tool-outputs", "t4"), { recursive: true });
+const goneFile = join(work, "tool-outputs", "t4", "call_4-tool_patch.json");
+writeFileSync(goneFile, JSON.stringify({ files: [{ path: join(workspace, "gone.txt"), hunks: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 2, lines: ["+ghost line one", "+ghost line two"] }] }] }));
+writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.dev.patchSeries": [seriesA, seriesB, goneFile], "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 // Images for the workspace-image check: one inside the workspace, one outside it (a real 1x1 PNG each).
 const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
@@ -271,10 +274,10 @@ try {
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
 
     // Every file changed in this chat: one row per file with the totals, and one diff from before the first edit.
-    await waitFor("the Changes button", () => evalWeb("!d.getElementById('changesBtn').hidden && d.getElementById('changesBtn').textContent === 'Changes (2)'"), 15000);
+    await waitFor("the Changes button", () => evalWeb("!d.getElementById('changesBtn').hidden && d.getElementById('changesBtn').textContent === 'Changes (3)'"), 15000);
     await evalWeb("(() => { d.getElementById('changesBtn').click(); return true; })()");
     const changes = await evalWeb("({ title: d.getElementById('extrasTitle').textContent, status: d.getElementById('extrasStatus').textContent, rows: [...d.querySelectorAll('#extrasList li')].map(li => li.querySelector('.session-title').textContent + ' | ' + li.querySelector('.session-meta').textContent) })");
-    check("the Changes panel lists each changed file once, with its edits and totals", changes.title === "Changes in this chat" && /2 files changed in 3 edits/.test(changes.status) && changes.rows.some((r) => r === "plan.txt | 1 edit · +1 \u22121") && changes.rows.some((r) => r === "series.txt | 2 edits · +2 \u22121"), JSON.stringify(changes));
+    check("the Changes panel lists each changed file once, with its edits and totals", changes.title === "Changes in this chat" && /3 files changed in 4 edits/.test(changes.status) && changes.rows.some((r) => r === "plan.txt | 1 edit · +1 \u22121") && changes.rows.some((r) => r === "series.txt | 2 edits · +2 \u22121"), JSON.stringify(changes));
     await shot("34-changes-panel");
     await evalWeb("(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => /series.txt/.test(x.textContent)); [...li.querySelectorAll('button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
     const seriesTab = await waitFor("the cumulative diff editor", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before this chat/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
@@ -284,6 +287,18 @@ try {
     check("the before side holds the original lines (two, no four) and the after side the final ones (TWO, four)", seriesSides.original.some((l) => /two/.test(l)) && !seriesSides.original.some((l) => /four|TWO/.test(l)) && seriesSides.modified.some((l) => /TWO/.test(l)) && seriesSides.modified.some((l) => /four/.test(l)), JSON.stringify(seriesSides));
     await shot("35-cumulative-diff");
     await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /before this chat/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
+    // A file the agent created and then deleted: the buttons must not fail silently.
+    check("the Changes panel lists the deleted scratch file too", changes.rows.some((r) => r === "gone.txt | 1 edit \u00b7 +2 \u22120"), JSON.stringify(changes.rows));
+    await evalWeb("(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => /gone.txt/.test(x.textContent)); [...li.querySelectorAll('button')].find(b => b.textContent === 'Open diff').click(); return true; })()");
+    const goneTab = await waitFor("the diff of the deleted file", () => evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /no longer exists/.test(x.textContent)); return !!document.querySelector('.monaco-diff-editor') && tab ? tab.textContent.trim() : null; })()"), 20000);
+    check("Open diff on a file that no longer exists shows what the agent wrote and says the file is gone", /gone\.txt \(as the agent wrote it; the file no longer exists\)/.test(goneTab), JSON.stringify(goneTab));
+    await waitFor("the deleted file's diff to paint", () => evalPage("document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line').length > 0"), 15000).catch(() => undefined);
+    const goneSides = await evalPage("(() => ({ modified: [...document.querySelectorAll('.monaco-diff-editor .editor.modified .view-line')].map(x => x.textContent.replace(/\u00a0/g, ' ')) }))()");
+    check("the written lines are shown", goneSides.modified.some((l) => /ghost line one/.test(l)) && goneSides.modified.some((l) => /ghost line two/.test(l)), JSON.stringify(goneSides));
+    await evalPage("(() => { const tab = [...document.querySelectorAll('.tab')].find(x => /no longer exists/.test(x.textContent)); const close = tab?.querySelector('.codicon-close, .action-label.codicon'); close?.click(); return true; })()");
+    await evalWeb("(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => /gone.txt/.test(x.textContent)); [...li.querySelectorAll('button')].find(b => b.textContent === 'Open file').click(); return true; })()");
+    await waitFor("the visible explanation", () => evalPage("[...document.querySelectorAll('.notifications-toasts .notification-list-item-message, .notification-toast')].some(x => /gone\\.txt no longer exists/.test(x.textContent))"), 15000);
+    check("Open file on a file that no longer exists explains it in an editor notification, not only in the hidden chat", true);
     await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
 
     // Scrolling: the view follows growing output, stops when the user scrolls up, and offers a button back down.

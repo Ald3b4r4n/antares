@@ -2,7 +2,7 @@
   "name": "antares",
   "displayName": "Antares",
   "description": "Open-source editor interface for the Muse Code agent, built on the official Muse Server Protocol (MSP).",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "ald3b4r4n",
   "license": "MIT",
   "icon": "media/antares.png",
