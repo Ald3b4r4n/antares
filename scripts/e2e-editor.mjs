@@ -5,11 +5,12 @@
 // screenshots of the real window to spike-output/e2e/.
 //
 // Usage: node scripts/e2e-editor.mjs <path-to-editor-exe> [label]
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { locateMuse } from "../src/muse/locate.ts";
 
 const exe = process.argv[2];
 const REAL = process.env.E2E_REAL === "1";
@@ -63,6 +64,7 @@ mkdirSync(join(work, "tool-outputs", "t4"), { recursive: true });
 const goneFile = join(work, "tool-outputs", "t4", "call_4-tool_patch.json");
 writeFileSync(goneFile, JSON.stringify({ files: [{ path: join(workspace, "gone.txt"), hunks: [{ oldStart: 1, oldLines: 0, newStart: 1, newLines: 2, lines: ["+ghost line one", "+ghost line two"] }] }] }));
 writeFileSync(join(workspace, ".vscode", "settings.json"), JSON.stringify(PLUGINS ? { "antares.usage.refreshOnOpen": false } : IMPORT ? { "antares.usage.refreshOnOpen": false, "antares.dev.picks": ["claude"] } : MODES ? { "antares.usage.refreshOnOpen": false } : REAL ? { "antares.initialProfile": ":ask-me", "antares.usage.refreshOnOpen": false } : { "antares.dev.provider": "echo", "antares.dev.patch": patchFile, "antares.dev.patchSeries": [seriesA, seriesB, goneFile], "antares.usage.refreshOnOpen": false, ...(VOICE === "fake" ? { "antares.dev.voice": true } : VOICE === "error" ? { "antares.voice.engine": "faster-whisper", "antares.voice.home": join(work, "empty-voice") } : {}) }, null, 2));
+{ const sf = join(workspace, ".vscode", "settings.json"); writeFileSync(sf, JSON.stringify({ ...JSON.parse(readFileSync(sf, "utf8")), "antares.offerCatalogs": false }, null, 2)); }
 writeFileSync(join(workspace, "hello.txt"), "hello\n");
 // Images for the workspace-image check: one inside the workspace, one outside it (a real 1x1 PNG each).
 const tinyPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
@@ -416,7 +418,7 @@ try {
     await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=plugins]').click(); return true; })()");
     await waitFor("the plugin list", () => evalWeb("!d.getElementById('extrasPanel').hidden && d.getElementById('extrasStatus').textContent !== 'Reading from Muse…'"), 60000);
     const buttons = await evalWeb("[...d.querySelectorAll('#extrasActions button')].map(b => b.textContent)");
-    check("the plugin list offers install from a folder, install from a marketplace and add marketplace", JSON.stringify(buttons) === JSON.stringify(["Install from folder\u2026", "Install from marketplace\u2026", "Add marketplace\u2026"]), JSON.stringify(buttons));
+    check("the plugin list offers install from a folder, install from a marketplace, the marketplaces view and add marketplace", JSON.stringify(buttons) === JSON.stringify(["Install from folder\u2026", "Install from marketplace\u2026", "Marketplaces\u2026", "Add marketplace\u2026"]), JSON.stringify(buttons));
 
     // An empty folder is refused by Muse's own validation, with the reason.
     await setPicks([emptyDir]);
@@ -711,6 +713,96 @@ try {
   const afterEnter = await evalWeb("({ users: d.querySelectorAll('.msg.user').length, last: [...d.querySelectorAll('.msg.user')].pop()?.querySelector('.body').textContent })");
   check("Enter sends the typed message", afterEnter.users === 2, JSON.stringify(afterEnter));
 
+  // Model catalog (B1): the refresh button asks the host again (no model call), and a failed refresh is flagged on the
+  // page without hiding the models already listed.
+  const modelsBefore = await evalWeb("d.getElementById('model').options.length");
+  await evalWeb("(() => { d.getElementById('refreshModels').click(); return true; })()");
+  await sleep(1500);
+  const modelsAfter = await evalWeb("({ n: d.getElementById('model').options.length, stale: !d.getElementById('modelsStale').hidden, title: d.getElementById('refreshModels').title })");
+  check("the refresh button re-reads the catalog and keeps the models", modelsAfter.n === modelsBefore && modelsAfter.n > 0 && !modelsAfter.stale, JSON.stringify({ modelsBefore, ...modelsAfter }));
+  await evalWeb("(() => { w.postMessage({ type: 'event', event: { type: 'modelsStatus', stale: true, error: 'catalog backend unavailable', fetchedAtMs: Date.now() } }, '*'); return true; })()");
+  const flagged = await evalWeb("({ n: d.getElementById('model').options.length, text: d.getElementById('modelsStale').textContent, hidden: d.getElementById('modelsStale').hidden, title: d.getElementById('modelsStale').title })");
+  check("a failed refresh is flagged and the models stay listed", !flagged.hidden && /out of date/.test(flagged.text) && /backend unavailable/.test(flagged.title) && flagged.n === modelsBefore, JSON.stringify(flagged));
+  await evalWeb("(() => { w.postMessage({ type: 'event', event: { type: 'modelsStatus', stale: false, fetchedAtMs: Date.now(), source: 'providerCatalog' } }, '*'); return true; })()");
+  check("a good refresh clears the flag", await evalWeb("d.getElementById('modelsStale').hidden"));
+
+  // Standard / Contributor (B2): a read-only indicator. The page shows the host's reading as it is, and "not confirmed" is
+  // never drawn as Standard.
+  const modeReal = await evalWeb("({ text: d.getElementById('modeInfo').textContent, mode: d.getElementById('modeInfo').dataset.mode || '' })");
+  check("the usage-mode indicator shows a reading from the real host", /^(Contributor|Standard|Mode: not confirmed)$/.test(modeReal.text), JSON.stringify(modeReal));
+  for (const [state, expectText, expectMode] of [
+    [{ mode: 'contributor', confirmed: true, label: 'Contributor', detail: 'Saved.', privacy: 'p' }, 'Contributor', 'contributor'],
+    [{ mode: 'standard', confirmed: true, label: 'Standard', detail: 'Saved.', privacy: 'p' }, 'Standard', 'standard'],
+    [{ mode: 'unconfirmed', confirmed: false, label: 'Mode: not confirmed', detail: 'Override may apply.', privacy: 'p' }, 'Mode: not confirmed', 'unconfirmed'],
+  ]) {
+    await evalWeb(`(() => { w.postMessage({ type: 'contributor', state: ${JSON.stringify(state)} }, '*'); return true; })()`);
+    const shown = await evalWeb("({ text: d.getElementById('modeInfo').textContent, mode: d.getElementById('modeInfo').dataset.mode, title: d.getElementById('modeInfo').title })");
+    check("usage mode " + expectMode + " is drawn as such", shown.text === expectText && shown.mode === expectMode && shown.title.includes(state.detail), JSON.stringify(shown));
+  }
+
+  // Skills manager (Phase C): read from Muse's own CLI (isolated config here), searchable and filterable; an activation change is
+  // written by the CLI and read back. Muse's built-in skills are what an empty config has.
+  if (!REAL) {
+    await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('[data-act=manageSkills]').click(); return true; })()");
+    await waitFor("the skills list", () => evalWeb("!d.getElementById('skillsPanel').hidden && d.querySelectorAll('#skillsList .skill-row').length > 0"), 30000);
+    const first = await evalWeb("(() => { const r = d.querySelector('#skillsList .skill-row'); return { count: d.querySelectorAll('#skillsList .skill-row').length, title: r.querySelector('.session-title').textContent, select: r.querySelector('select.skill-activation').value, status: d.getElementById('skillsStatus').textContent.slice(0, 80) }; })()");
+    check("the skills manager lists what Muse knows, with an activation state", first.count > 0 && ["on", "userInvocableOnly", "off"].includes(first.select), JSON.stringify(first));
+    await evalWeb("(() => { const s = d.getElementById('skillsSearch'); s.value = 'zzz-no-such-skill'; s.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()");
+    check("searching narrows the list", await evalWeb("d.querySelectorAll('#skillsList .skill-row').length === 0"));
+    await evalWeb("(() => { const s = d.getElementById('skillsSearch'); s.value = ''; s.dispatchEvent(new w.Event('input', { bubbles: true })); return true; })()");
+    // Change one skill's activation through the real CLI and see it read back.
+    const target = await evalWeb("(() => { const r = d.querySelector('#skillsList .skill-row select.skill-activation'); return r.getAttribute('aria-label'); })()");
+    await evalWeb("(() => { const sel = d.querySelector('#skillsList .skill-row select.skill-activation'); sel.value = 'off'; sel.dispatchEvent(new w.Event('change', { bubbles: true })); return true; })()");
+    await waitFor("the activation to be read back", () => evalWeb("(() => { const sel = d.querySelector('#skillsList .skill-row select.skill-activation'); return !!sel && sel.value === 'off' && !sel.disabled; })()"), 30000);
+    const afterOff = await evalWeb("({ aria: d.querySelector('#skillsList .skill-row select.skill-activation').getAttribute('aria-label'), useDisabled: d.querySelector('#skillsList .skill-row .extra-badges button').disabled })");
+    check("turning a skill off is written by Muse and read back (its Use button is disabled)", afterOff.aria === target && afterOff.useDisabled === true, JSON.stringify({ target, ...afterOff }));
+    await evalWeb("(() => { const sel = d.querySelector('#skillsList .skill-row select.skill-activation'); sel.value = 'on'; sel.dispatchEvent(new w.Event('change', { bubbles: true })); return true; })()");
+    await waitFor("the skill to be back on", () => evalWeb("(() => { const sel = d.querySelector('#skillsList .skill-row select.skill-activation'); return !!sel && sel.value === 'on' && !sel.disabled; })()"), 30000);
+    // A name offered twice is called out; an activation Muse did not state is shown as unknown, never as on.
+    await evalWeb(`(() => { w.postMessage({ type: 'skillsManage', conflicts: ['plan'], rows: [
+      { id: 'plan', name: 'plan', displayName: 'plan', description: 'built-in', scope: 'bundled', origin: 'bundled', activation: 'on', diagnostics: [] },
+      { id: 'plan', name: 'plan', displayName: 'plan', description: 'yours', scope: 'user', origin: 'local', path: '$CONFIG_DIR/skills/plan/SKILL.md', activation: 'unknown', diagnostics: ['warning: unknown field'] } ] }, '*'); return true; })()`);
+    const synth = await evalWeb("({ warns: [...d.querySelectorAll('#skillsList .skill-warn')].map(n => n.textContent), unknown: d.querySelectorAll('#skillsList .skill-row')[1].querySelector('select').value, remove: !!d.querySelectorAll('#skillsList .skill-row')[1].querySelector('.extra-badges button:last-child') && d.querySelectorAll('#skillsList .skill-row')[1].querySelector('.extra-badges button:last-child').textContent })");
+    check("a duplicated name and a diagnostic are called out, an unstated activation shows as unknown, an installed skill can be removed", synth.warns.some((x) => /Another skill has the name \/plan/.test(x)) && synth.warns.some((x) => /unknown field/.test(x)) && synth.unknown === 'unknown' && synth.remove === 'Remove', JSON.stringify(synth));
+    await evalWeb("(() => { d.getElementById('skillsClose').click(); return true; })()");
+    check("the skills panel closes", await evalWeb("d.getElementById('skillsPanel').hidden"));
+  }
+
+  // Web access (Phase H) and Preview (Phase I). The web indicator reads Muse's real settings (isolated config: the defaults);
+  // Preview opens the editor's built-in browser, on a page served read-only from this folder.
+  if (!REAL) {
+    const web = await evalWeb("({ text: d.getElementById('webInfo').textContent, title: d.getElementById('webInfo').title })");
+    check("the web indicator shows Muse's web-tool settings (defaults: on) and says the stricter modes still ask", web.text === "Web: on" && /web_fetch/.test(web.title) && /approval/i.test(web.title), JSON.stringify(web));
+    const quick = async (what) => waitFor(what, () => evalPage("(() => { const w = document.querySelector('.quick-input-widget'); if (!w || w.style.display === 'none') return null; const rows = [...w.querySelectorAll('.quick-input-list .monaco-list-row')].map(r => r.textContent.trim().replace(/\\s+/g, ' ')); return rows.length ? rows : null; })()"), 20000);
+    const escapeQuick = async () => { await evalPage("(() => { const w = document.querySelector('.quick-input-widget input'); if (w) { w.focus(); } return true; })()"); await browser.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }, pageSession); await browser.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 }, pageSession); await sleep(300); };
+    await evalWeb("(() => { d.getElementById('webInfo').click(); return true; })()");
+    const webItems = await quick("the web menu");
+    check("the web menu offers the changes that are possible from the current state (and nothing already in effect)", webItems.some((r) => /Turn page reading off/.test(r)) && webItems.some((r) => /Searching: hosted/.test(r)) && webItems.some((r) => /Turn searching off/.test(r)) && !webItems.some((r) => /Searching: client/.test(r)), JSON.stringify(webItems));
+    await escapeQuick();
+
+    writeFileSync(join(workspace, "landing.html"), "<!doctype html><title>Landing</title><link rel=stylesheet href=style.css><h1>Hello landing</h1>");
+    writeFileSync(join(workspace, "style.css"), "h1{color:#e8412b}");
+    await evalWeb("(() => { w.postMessage({ type: 'previewUrls', urls: ['http://localhost:5173/'] }, '*'); return true; })()");
+    check("when the agent prints a local address the Preview button says so", await evalWeb("d.getElementById('previewBtn').textContent === 'Preview ●' && d.getElementById('previewBtn').title.includes('http://localhost:5173/')"));
+    await evalWeb("(() => { d.getElementById('previewBtn').click(); return true; })()");
+    const prevItems = await quick("the preview menu");
+    check("the preview menu offers typing an address and serving an HTML file of this folder", prevItems.some((r) => /Open an address/.test(r)) && prevItems.some((r) => /Preview an HTML file from this folder/.test(r)), JSON.stringify(prevItems));
+    await evalPage("(() => { const r = [...document.querySelectorAll('.quick-input-widget .quick-input-list .monaco-list-row')].find(x => /Preview an HTML file/.test(x.textContent)); r.click(); return true; })()");
+    await waitFor("the html file list", () => evalPage("(() => { const w = document.querySelector('.quick-input-widget'); return !!w && w.style.display !== 'none' && [...w.querySelectorAll('.quick-input-list .monaco-list-row')].some(x => /landing\\.html/.test(x.textContent)); })()"), 20000);
+    await evalPage("(() => { const r = [...document.querySelectorAll('.quick-input-widget .quick-input-list .monaco-list-row')].find(x => /landing\\.html/.test(x.textContent)); r.click(); return true; })()");
+    await waitFor("the serve confirmation", () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return !!b && [...b.querySelectorAll('.dialog-buttons .monaco-button')].some(x => x.textContent.trim() === 'Serve and preview'); })()"), 20000);
+    await evalPage("(() => { [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === 'Serve and preview').click(); return true; })()");
+    // VS Code opens its Simple Browser (the tab is titled by the page and carries the address); Antigravity opens its own browser tab ("Jetski Preview").
+    const opened = await waitFor("the built-in browser tab", () => evalPage("(() => { const hit = [...document.querySelectorAll('.tab')].map(x => (x.getAttribute('aria-label') || '').trim()).find(x => x.includes('127.0.0.1') || /Jetski Preview/.test(x)); return hit || null; })()"), 30000);
+    check("Preview opens the page in the editor's own browser tab", (/^Landing/.test(opened) && /127\.0\.0\.1:\d+/.test(opened)) || /Jetski Preview/.test(opened), JSON.stringify(opened));
+    const notices = await waitFor("the address in the chat", async () => { const all = await evalWeb("[...d.querySelectorAll('.notice')].map(n => n.textContent)"); return all.some((x) => /Opened http:\/\/127\.0\.0\.1:\d+\/landing\.html in the editor/.test(x)) ? all : null; }, 20000);
+    const previewPort = /127\.0\.0\.1:(\d+)/.exec(notices.find((x) => /Opened http:\/\/127\.0\.0\.1/.test(x)))[1];
+    const probe = async (path) => { try { const r = await fetch("http://127.0.0.1:" + previewPort + path); return { status: r.status, body: (await r.text()).slice(0, 200) }; } catch (e) { return { error: e.message }; } };
+    const served = { page: await probe("/landing.html"), css: await probe("/style.css"), dot: await probe("/.vscode/settings.json"), up: await probe("/..%2f..%2fpackage.json") };
+    check("the folder is served read-only: the page and its CSS load, dotfiles and paths outside the folder do not", served.page.status === 200 && /Hello landing/.test(served.page.body) && served.css.status === 200 && served.dot.status === 404 && served.up.status !== 200, JSON.stringify(served));
+    await shot("24-preview");
+  }
+
   // Images: a pasted image shows a thumbnail (the page's CSP must allow data: images) and is sent.
   await evalWeb(`(async () => {
     const c = d.createElement('canvas'); c.width = 64; c.height = 48; const g = c.getContext('2d'); g.fillStyle = '#e8412b'; g.fillRect(0, 0, 64, 48);
@@ -770,7 +862,7 @@ try {
     // The menu.
     await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
     const menu = await evalWeb("({ open: !d.getElementById('plusMenu').hidden, expanded: d.getElementById('plus').getAttribute('aria-expanded'), items: [...d.querySelectorAll('#plusMenu .menu-item')].map(b => b.querySelector('span').textContent) })");
-    check("the + button opens a menu with files, folder, slash commands, connectors, plugins and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Add current file", "Add selection", "Slash commands", "Connectors", "Plugins", "Import skills…"]), JSON.stringify(menu));
+    check("the + button opens a menu with files, folder, slash commands, connectors, plugins, skills management and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Add current file", "Add selection", "Slash commands", "Connectors", "Plugins", "Manage skills…", "Import skills…"]), JSON.stringify(menu));
     await shot("15-plus-menu");
 
     // Files and photos: a text file inside the workspace becomes @path, a name with a space is quoted, a photo
@@ -859,9 +951,129 @@ try {
       await evalWeb(`(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=${act}]').click(); return true; })()`);
       await waitFor(`the ${act} list`, () => evalWeb("!d.getElementById('extrasPanel').hidden && d.getElementById('extrasStatus').textContent !== 'Reading from Muse…'"), 30000);
       const extras = await evalWeb("({ title: d.getElementById('extrasTitle').textContent, status: d.getElementById('extrasStatus').textContent, rows: d.querySelectorAll('#extrasList li').length })");
-      check(`the ${act} list answers from the real host (rows or a clear empty state)`, title.test(extras.title) && !/^Could not/.test(extras.status) && /(Sign in and out here|Installing runs nothing)/.test(extras.status), JSON.stringify(extras));
+      check(`the ${act} list answers from the real host (rows or a clear empty state)`, title.test(extras.title) && !/^Could not/.test(extras.status) && /(Servers defined in Muse's settings|Installing runs nothing|Skills of an enabled plugin)/.test(extras.status), JSON.stringify(extras));
       await shot(`21-${act}`);
       await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
+    }
+
+    // Plugin manager (Phase E): what a plugin brings from Muse's own CLI, approval of its hooks and MCP servers one by one (never
+    // automatic), enable, update, remove, and the marketplaces view. The demo plugin brings a skill, a harmless echo hook and the mini MCP
+    // server (never started here), in this run's isolated Muse data.
+    {
+      const museBinary = locateMuse(undefined);
+      const cliEnv = { ...process.env, XDG_CONFIG_HOME: join(muse, "config"), XDG_DATA_HOME: join(muse, "data"), MUSE_AUTH_PATH: join(muse, "config", "absent-auth.json"), META_API_KEY: "" };
+      const cli = (...args) => execFileSync(museBinary, args, { env: cliEnv, encoding: "utf8", timeout: 60000, stdio: ["ignore", "pipe", "pipe"] });
+      const demo = join(work, "plugin-demo");
+      mkdirSync(join(demo, ".claude-plugin"), { recursive: true });
+      mkdirSync(join(demo, "skills", "hello"), { recursive: true });
+      mkdirSync(join(demo, "hooks"), { recursive: true });
+      writeFileSync(join(demo, ".claude-plugin", "plugin.json"), JSON.stringify({ name: "antares-demo", version: "0.0.1", description: "A harmless demo bundle." }));
+      writeFileSync(join(demo, "skills", "hello", "SKILL.md"), "---\nname: hello\ndescription: Says hello. Demo only.\n---\nSay hello.\n");
+      writeFileSync(join(demo, "hooks", "hooks.json"), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: "echo antares-demo-hook" }] }] } }));
+      writeFileSync(join(demo, ".mcp.json"), JSON.stringify({ mcpServers: { "demo-mini": { command: process.execPath, args: [join(root, "test", "fixtures", "mini-mcp-server.mjs")] } } }));
+      const market = join(work, "plugin-market");
+      mkdirSync(join(market, ".claude-plugin"), { recursive: true });
+      writeFileSync(join(market, ".claude-plugin", "marketplace.json"), JSON.stringify({ name: "demo-market", owner: { name: "e2e" }, plugins: [{ name: "antares-demo", source: "./antares-demo", description: "demo" }] }));
+      cpSync(demo, join(market, "antares-demo"), { recursive: true });
+      cli("plugins", "install", demo, "--scope", "user", "--json");
+      cli("plugins", "marketplace", "add", "demo-market", market, "--json");
+      const clickDialog2 = async (label) => {
+        await waitFor("the dialog " + label, () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return !!b && [...b.querySelectorAll('.dialog-buttons .monaco-button')].some(x => x.textContent.trim() === " + JSON.stringify(label) + "); })()"), 20000);
+        await evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === " + JSON.stringify(label) + "); btn.click(); return true; })()");
+      };
+      const planRow = (label) => "(() => { const li = [...d.querySelectorAll('#extrasList li')][0]; const b = [...li.querySelectorAll('button')].find(x => x.textContent === " + JSON.stringify(label) + "); b.click(); return true; })()";
+      const partButton = (kindText, label) => "(() => { const line = [...d.querySelectorAll('#extrasList .plugin-part')].find(x => x.textContent.startsWith(" + JSON.stringify(kindText) + ")); const b = [...line.querySelectorAll('button')].find(x => x.textContent === " + JSON.stringify(label) + "); b.click(); return true; })()";
+      const partText = (kindText) => "([...d.querySelectorAll('#extrasList .plugin-part')].find(x => x.textContent.startsWith(" + JSON.stringify(kindText) + ")) || { textContent: '' }).textContent";
+      await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=plugins]').click(); return true; })()");
+      await waitFor("the plugin from the CLI", () => evalWeb("d.querySelectorAll('#extrasList .extra-row').length === 1 && d.querySelectorAll('#extrasList .plugin-part').length === 2"), 60000);
+      const rich = await evalWeb("({ title: d.querySelector('#extrasList .session-title').textContent, parts: [...d.querySelectorAll('#extrasList .plugin-part')].map(x => x.textContent.replace(/Approve…|Reject/g, '').trim()), badges: [...d.querySelectorAll('#extrasList .extra-badges .badge')].map(x => x.textContent), text: d.getElementById('extrasList').textContent })");
+      check("the plugin list says what it brings and that its hook and MCP server wait for review (nothing is approved by default)", rich.title === 'antares-demo' && rich.parts.some((p) => /^Hook .*echo antares-demo-hook.*waiting for your review/.test(p)) && rich.parts.some((p) => /^MCP server .*waiting for your review/.test(p)) && rich.badges.includes('2 to review') && /1 skill/.test(rich.text), JSON.stringify(rich));
+      await shot("23-plugins-review");
+      await evalWeb(partButton("Hook", "Approve…"));
+      await clickDialog2("Approve");
+      await waitFor("the hook approved", () => evalWeb(partText("Hook") + ".includes('approved, runs')"), 60000);
+      check("approving the hook (after a warning that it runs outside the sandbox) changes only the hook", await evalWeb(partText("MCP server") + ".includes('waiting for your review')"));
+      await evalWeb(partButton("MCP server", "Reject"));
+      await clickDialog2("Reject");
+      await waitFor("the MCP server rejected", () => evalWeb(partText("MCP server") + ".includes('rejected')"), 60000);
+      check("rejecting the MCP server leaves it not running and nothing left to review", await evalWeb("![...d.querySelectorAll('#extrasList .badge')].some(x => /to review/.test(x.textContent))"));
+      await evalWeb(planRow("Disable"));
+      await clickDialog2("Disable");
+      await waitFor("the plugin disabled", () => evalWeb("[...d.querySelectorAll('#extrasList .badge')].some(x => x.textContent === 'not loaded') && /disabled: its hooks and MCP servers are not loaded/.test(d.getElementById('extrasList').textContent)"), 60000);
+      check("disabling says the hooks and MCP servers are no longer loaded", true);
+      await evalWeb(planRow("Enable"));
+      await clickDialog2("Enable");
+      await waitFor("the plugin enabled", () => evalWeb("[...d.querySelectorAll('#extrasList .badge')].some(x => x.textContent === 'loaded') && " + partText("Hook") + ".includes('approved, runs')"), 60000);
+      check("enabling again keeps the earlier approvals", true);
+      await evalWeb(planRow("Update"));
+      await clickDialog2("Update");
+      await waitFor("the update notice", () => evalWeb("[...d.querySelectorAll('.notice')].some(n => /Updated antares-demo/.test(n.textContent))"), 60000);
+      check("update runs through Muse and tells the user to check for changed parts", true);
+      // Marketplaces view
+      await evalWeb("(() => { [...d.querySelectorAll('#extrasActions button')].find(b => b.textContent === 'Marketplaces…').click(); return true; })()");
+      await waitFor("the marketplaces", () => evalWeb("d.getElementById('extrasTitle').textContent === 'Marketplaces' && d.querySelectorAll('#extrasList .extra-row:not(.suggested):not(.suggested-head)').length === 1"), 60000);
+      const mk = await evalWeb("(() => { const row = d.querySelector('#extrasList .extra-row:not(.suggested):not(.suggested-head)'); return { name: row.querySelector('.session-title').textContent, meta: row.querySelector('.session-meta').textContent, buttons: [...row.querySelectorAll('.extra-badges button')].map(b => b.textContent) }; })()");
+      check("the marketplaces view lists the catalog with Refresh and Remove", mk.name === 'demo-market' && /local-dir/.test(mk.meta) && /1 plugin/.test(mk.meta) && mk.buttons.join() === 'Refresh,Remove', JSON.stringify(mk));
+      const sug = await evalWeb("({ titles: [...d.querySelectorAll('#extrasList .suggested .session-title')].map(x => x.textContent), buttons: [...d.querySelectorAll('#extrasList .suggested .extra-badges button')].map(x => x.textContent), head: !!d.querySelector('#extrasList .suggested-head') })");
+      check("the marketplaces view suggests a plugin marketplace and a skills collection, each added only by a button (nothing is added by itself)", sug.head && sug.titles.length === 2 && sug.buttons.join() === 'Add catalog…,Browse skills…' && /official plugins/.test(sug.titles[0]) && /Agent Skills/.test(sug.titles[1]), JSON.stringify(sug));
+      await evalWeb("(() => { [...d.querySelectorAll('#extrasList .extra-badges button')].find(b => b.textContent === 'Refresh').click(); return true; })()");
+      await waitFor("the refresh notice", () => evalWeb("[...d.querySelectorAll('.notice')].some(n => /Refreshed the marketplace demo-market/.test(n.textContent))"), 60000);
+      await evalWeb("(() => { [...d.querySelectorAll('#extrasList .extra-badges button')].find(b => b.textContent === 'Remove').click(); return true; })()");
+      await clickDialog2("Remove");
+      await waitFor("the marketplace removed", () => evalWeb("d.querySelectorAll('#extrasList .extra-row:not(.suggested):not(.suggested-head)').length === 0"), 60000);
+      check("removing a marketplace asks first and leaves installed plugins alone", /antares-demo/.test(cli("plugins", "list", "--json")));
+      await evalWeb("(() => { [...d.querySelectorAll('#extrasActions button')].find(b => b.textContent === '← Plugins').click(); return true; })()");
+      await waitFor("the plugins view", () => evalWeb("d.getElementById('extrasTitle').textContent === 'Plugins' && d.querySelectorAll('#extrasList .extra-row:not(.suggested):not(.suggested-head)').length === 1"), 60000);
+      await evalWeb(planRow("Remove"));
+      await clickDialog2("Remove");
+      await waitFor("the plugin removed", () => evalWeb("d.querySelectorAll('#extrasList .extra-row:not(.suggested):not(.suggested-head)').length === 0"), 60000);
+      check("removing a plugin asks first and Muse no longer lists it", !/antares-demo/.test(cli("plugins", "list", "--json")));
+      await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
+    }
+
+    // MCP manager (Phase D): servers defined in Muse's settings.json are listed from the file (the host's list does not show them),
+    // secrets stay hidden, Test makes Muse itself start the server, and every write asks first and keeps a backup.
+    {
+      const mcpDir = join(muse, "config", "muse");
+      mkdirSync(mcpDir, { recursive: true });
+      const mcpFile = join(mcpDir, "settings.json");
+      const miniServer = join(root, "test", "fixtures", "mini-mcp-server.mjs");
+      writeFileSync(mcpFile, JSON.stringify({ schema_version: 1, contributor_mode_enabled: false, mcpServers: {
+        mini: { transport: "stdio", command: process.execPath, args: [miniServer], mode: "optional", env: { MINI_SECRET: "e2e-secret-value-123" } },
+        gone: { transport: "stdio", command: "definitely-not-a-real-command-xyz", mode: "optional" },
+      } }, null, 2));
+      const clickDialog = async (label) => {
+        await waitFor("the dialog " + label, () => evalPage("(() => { const b = document.querySelector('.monaco-dialog-box'); return !!b && [...b.querySelectorAll('.dialog-buttons .monaco-button')].some(x => x.textContent.trim() === " + JSON.stringify(label) + "); })()"), 20000);
+        await evalPage("(() => { const btn = [...document.querySelectorAll('.monaco-dialog-box .dialog-buttons .monaco-button')].find(x => x.textContent.trim() === " + JSON.stringify(label) + "); btn.click(); return true; })()");
+      };
+      await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=connectors]').click(); return true; })()");
+      await waitFor("the connectors from the file", () => evalWeb("d.querySelectorAll('#extrasList li').length === 2"), 30000);
+      const listed = await evalWeb("({ names: [...d.querySelectorAll('#extrasList .session-title')].map(n => n.textContent), text: d.getElementById('extrasPanel').textContent, adds: [...d.querySelectorAll('#extrasActions button')].map(b => b.textContent) })");
+      check("the connectors list shows the servers defined in settings.json, with env names and no secret values", listed.names.join() === "mini,gone" && /MINI_SECRET/.test(listed.text) && !/e2e-secret-value-123/.test(listed.text) && listed.adds.join() === "Add local server…,Add HTTP server…", JSON.stringify({ names: listed.names, adds: listed.adds }));
+      await shot("22-connectors-file");
+      const rowButton = (name, label) => "(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => x.querySelector('.session-title').textContent === " + JSON.stringify(name) + "); const b = [...li.querySelectorAll('button')].find(x => x.textContent === " + JSON.stringify(label) + "); b.click(); return true; })()";
+      await evalWeb(rowButton("mini", "Test"));
+      await clickDialog("Test");
+      await waitFor("the test to answer", () => evalWeb("/answered/.test(d.querySelector('.mcp-test[data-name=mini]').textContent)"), 60000);
+      check("Test makes Muse start the server and reports that it answered", true);
+      await evalWeb(rowButton("gone", "Test"));
+      await clickDialog("Test");
+      await waitFor("the failed test", () => evalWeb("/Did not start/.test(d.querySelector('.mcp-test[data-name=gone]').textContent)"), 60000);
+      const failed = await evalWeb("d.querySelector('.mcp-test[data-name=gone]').textContent");
+      check("a server that cannot start is reported with Muse's reason", /configured command is unavailable/.test(failed), failed);
+      await evalWeb(rowButton("mini", "Disable"));
+      await clickDialog("Save");
+      await waitFor("the file to change", () => evalWeb("[...d.querySelectorAll('#extrasList li')].find(x => x.querySelector('.session-title').textContent === 'mini')?.textContent.includes('disabled') === true"), 30000);
+      const saved = JSON.parse(readFileSync(mcpFile, "utf8"));
+      const backups = readdirSync(mcpDir).filter((x) => x.includes("antares-bak"));
+      check("disabling asks first, changes only that server, keeps everything else, and leaves a backup", saved.mcpServers.mini.enabled === false && saved.mcpServers.mini.env.MINI_SECRET === "e2e-secret-value-123" && saved.contributor_mode_enabled === false && saved.mcpServers.gone.mode === "optional" && backups.length === 1, JSON.stringify({ enabled: saved.mcpServers.mini.enabled, backups: backups.length }));
+      await evalWeb(rowButton("gone", "Remove"));
+      await clickDialog("Save");
+      await waitFor("the removal", () => evalWeb("d.querySelectorAll('#extrasList li').length === 1"), 30000);
+      check("removing a server deletes only its entry", Object.keys(JSON.parse(readFileSync(mcpFile, "utf8")).mcpServers).join() === "mini");
+      await evalWeb("(() => { d.getElementById('extrasClose').click(); return true; })()");
+      rmSync(mcpFile, { force: true });
+      for (const b of readdirSync(mcpDir).filter((x) => x.includes("antares-bak"))) rmSync(join(mcpDir, b), { force: true });
     }
   }
 

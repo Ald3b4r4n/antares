@@ -127,6 +127,8 @@ export type ChatEvent =
       subscriptionActive?: boolean;
     }
   | { type: "models"; models: ModelInfo[] }
+  /** Whether the catalog shown is the host's current answer, and if not, why. */
+  | { type: "modelsStatus"; stale: boolean; fetchedAtMs?: number; source?: string; error?: string }
   | { type: "modelChanged"; modelId: string; providerId?: string; source: string }
   | { type: "ledger"; todayTokens: number; weekTokens: number }
   | { type: "effortChanged"; effort: string; source: string }
@@ -346,6 +348,19 @@ export function mapModels(result: unknown): ModelInfo[] {
     });
   }
   return models;
+}
+
+/** The catalog's provenance as the host labels it (`providerCatalog`, `bundledCatalog`, ...); undefined when absent. */
+export function catalogSource(result: unknown): string | undefined {
+  return isObj(result) ? str(result.source) : undefined;
+}
+
+/** What changed between two catalogs, by model id. The first catalog (nothing before it) is not a change. */
+export function diffCatalog(before: ModelInfo[], after: ModelInfo[]): { added: string[]; removed: string[] } {
+  if (before.length === 0) return { added: [], removed: [] };
+  const had = new Set(before.map((m) => m.modelId));
+  const has = new Set(after.map((m) => m.modelId));
+  return { added: after.filter((m) => !had.has(m.modelId)).map((m) => m.modelId), removed: before.filter((m) => !has.has(m.modelId)).map((m) => m.modelId) };
 }
 
 export function mapAttachments(value: unknown): AttachmentInfo[] {

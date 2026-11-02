@@ -43,6 +43,28 @@ export function chatHtml(options: ChatHtmlOptions): string {
   <div id="historyStatus" class="overlay-status"></div>
   <ul id="historyList" class="session-list"></ul>
 </section>
+<section id="skillsPanel" class="overlay" hidden aria-label="Skills">
+  <div class="overlay-head">
+    <strong>Skills</strong>
+    <input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" />
+    <select id="skillsFilter" aria-label="Filter skills">
+      <option value="all">All</option>
+      <option value="user">Yours</option>
+      <option value="project">Project</option>
+      <option value="plugin">Plugins</option>
+      <option value="bundled">Built-in</option>
+      <option value="attention">Off or with problems</option>
+    </select>
+    <span id="skillsActions" class="extras-actions">
+      <button id="skillsImport" class="link tiny" title="Copy skills from Claude's or Codex's folders into Muse (you see a preview first)">Import…</button>
+      <button id="skillsInstall" class="link tiny" title="Check a skill folder with Muse, then install it for you">Install from folder…</button>
+      <button id="skillsRefresh" class="link tiny" title="Read the list from Muse again">↻</button>
+    </span>
+    <button id="skillsClose" class="link" aria-label="Close">Close</button>
+  </div>
+  <div id="skillsStatus" class="overlay-status" role="status"></div>
+  <ul id="skillsList" class="session-list"></ul>
+</section>
 <section id="extrasPanel" class="overlay" hidden aria-label="Connectors and plugins">
   <div class="overlay-head">
     <strong id="extrasTitle">Connectors</strong>
@@ -61,6 +83,11 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <select id="model" title="Model for this chat. Takes effect on the next message."></select>
     <label for="effort">Effort</label>
     <select id="effort" title="Reasoning effort sent with each message"></select>
+    <button id="refreshModels" class="link tiny" title="Ask Muse for the model list again (no model call)">↻ Models</button>
+    <span id="modelsStale" class="stale" hidden role="status"></span>
+    <button id="previewBtn" class="link tiny" title="See a page in the editor: a local dev server the agent started, any web address, or an HTML file from this folder">Preview</button>
+    <button id="webInfo" class="link tiny" title="Web access for the agent: reading pages and searching" aria-haspopup="dialog">Web: …</button>
+    <button id="modeInfo" class="link tiny mode-info" title="Standard or Contributor: what this means for your data" aria-haspopup="dialog">Mode: …</button>
     <button id="changesBtn" class="link tiny" hidden title="Every file changed in this chat, with one diff per file from before the first edit">Changes</button>
     <button id="refreshUsage" class="link tiny" title="Read fresh subscription usage from Muse (no model call; at most one read per minute)">↻ Usage</button>
   </div>
@@ -80,6 +107,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <button role="menuitem" data-act="slash" class="menu-item"><span>Slash commands</span><kbd>/</kbd></button>
     <button role="menuitem" data-act="connectors" class="menu-item"><span>Connectors</span></button>
     <button role="menuitem" data-act="plugins" class="menu-item"><span>Plugins</span></button>
+    <button role="menuitem" data-act="manageSkills" class="menu-item"><span>Manage skills…</span></button>
     <button role="menuitem" data-act="importSkills" class="menu-item"><span>Import skills…</span></button>
   </div>
   <div class="composer">

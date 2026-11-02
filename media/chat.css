@@ -129,6 +129,14 @@ textarea:focus { outline: none; border-color: var(--focus); }
 .controls select { background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; font: inherit; max-width: 100%; }
 .controls select:focus { outline: none; border-color: var(--focus); }
 .controls select:disabled { opacity: .55; }
+.controls .mode-info[data-mode="contributor"] { color: var(--warning, #d9a441); }
+.controls .mode-info[data-mode="unconfirmed"] { color: var(--muted); }
+.skill-row .skill-desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.skill-row .skill-warn { color: var(--warning, #d9a441); white-space: normal; }
+.skill-row .extra-badges { flex-wrap: wrap; justify-content: flex-end; }
+.skill-row select { background: var(--input-bg); color: var(--input-fg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; font: inherit; max-width: 12em; }
+#skillsSearch { flex: 1 1 8em; min-width: 6em; }
+.controls .stale { color: var(--warning, #d9a441); font-size: 11px; }
 
 /* ---- image attachments ---- */
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; flex: none; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); cursor: pointer; }

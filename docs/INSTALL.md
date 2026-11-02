@@ -15,10 +15,10 @@ Windows is the tested platform. macOS and Linux may work for the chat, but were 
 
 ## 2. Install
 
-1. Download **`antares-0.1.4.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases) (it is a pre-release).
+1. Download **`antares-0.2.0.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases) (it is a pre-release).
 2. Install it, either way:
    - **In the editor:** open the Extensions view, click the **`...`** menu at its top, choose **Install from VSIX...**, pick the file.
-   - **From a terminal:** `code --install-extension antares-0.1.4.vsix` (use your editor's command instead of `code`, for example `antigravity-ide`; its `bin` folder is in the editor's install directory).
+   - **From a terminal:** `code --install-extension antares-0.2.0.vsix` (use your editor's command instead of `code`, for example `antigravity-ide`; its `bin` folder is in the editor's install directory).
 3. **Reload the window**: `Ctrl+Shift+P`, then *Developer: Reload Window*.
 
 To build it yourself instead: `git clone https://github.com/Ald3b4r4n/antares`, then in `muse-extension` run `npm install`, `npm run build`, `npm run package`, and install the `.vsix` it creates (Node.js 22+).
@@ -79,6 +79,16 @@ Changing mode keeps the conversation. Anything above Plan asks you to confirm fi
 
 **The "+" button** adds files and photos (`Ctrl+U`), a folder, the current file, the selection, a skill (`/`), shows connectors and plugins, installs plugins, and imports skills. You can also paste or drop images and files. Files outside the workspace need *Add folder* first.
 
+**Models and plan:** the model and effort pickers show what Muse offers your account. If the list may be out of date the page says so; **↻ Models** reads it again, and Antares also reads it again when your plan changes or the window comes back to the front. A model your plan does not include is simply not offered.
+
+**Usage mode:** the **Standard / Contributor** button shows the mode saved in Muse. Contributor lets Meta use your content to train its models. It says "not confirmed" whenever the saved setting does not prove what is in effect. You can switch to Standard from there (after a confirmation); to turn Contributor on, use Muse itself.
+
+**Web:** the **Web** button shows whether Muse's page-reading and search tools are on and lets you switch them. Under the stricter permission modes, reaching a site still asks for your approval.
+
+**Preview:** the **Preview** button opens a page in the editor's own browser: a local address the agent printed (the button shows a dot), an address you type, or an HTML file of your folder (served read-only on 127.0.0.1 while the chat is open).
+
+**Skills, connectors, plugins** (from the "+" menu): *Manage skills* lists every skill with its real on / off state and lets you change it, install from a folder or remove. *Connectors* lists the MCP servers in Muse's settings and lets you add, edit, switch off, remove and **Test** them (every change asks first and keeps a backup). *Plugins* shows what each plugin brings and whether its hooks and MCP servers are waiting for your review: nothing runs until you approve it. *Marketplaces* offers a few suggested catalogs (never added by itself) and lets you add your own.
+
 **While Muse works:** `Enter` steers the running turn; `Ctrl+Enter` queues the message.
 
 **Following the output:** the view scrolls as Muse writes. Scroll up to read something and it stops; click the round arrow button above the message box to jump back to the latest message. The **Copy** button for the answer appears under the last message when the task finishes.
@@ -107,15 +117,17 @@ Changing mode keeps the conversation. Anything above Plan asks you to confirm fi
 
 Antares launches the official `muse serve` and speaks to it locally. It does not read your `auth.json`, does not call the key-minting endpoint, and does not call the model API itself. Usage numbers come from Muse. Voice audio stays on your machine. Antares sends nothing to any server of its own (it has none).
 
-## 10. What is still missing in 0.1.4
+## 10. What is still missing in 0.2.0
 
 - **Video input** (not built; could not be tested end to end).
 - **Worktrees** (the host's own git probe timed out on the test machine).
 - **Voice recording on macOS and Linux** (Windows only).
 - **An embedded terminal** (left out on purpose).
-- **Adding or removing MCP servers** and **reading a skill's on/off state** (the protocol does not offer them).
+- **Muse Image** (generating images with the subscription): Muse does not expose it. The documented route is a separate API with a key and per-image billing, which Antares does not use.
+- **The agent controlling a browser by itself** (clicking, filling forms): needs a browser MCP server you set up in Muse (see [BROWSER.md](BROWSER.md)). Preview only opens pages for you.
+- **Installing skills straight from a Git URL** (Muse installs from a local folder; Antares can download a skills collection and install the ones you pick).
 - **The image a model saw through a tool** and **model-generated images** (Muse does not expose them).
-- **Not verified with real services:** connector OAuth against a real provider, plugins that bring hooks or MCP servers, the Auto-review reviewer, and a real browser server.
+- **Not verified with real services:** connector OAuth against a real provider, a third-party plugin (the tests use a demo plugin), and the Auto-review reviewer.
 - **Not published** to the Open VSX registry or the VS Code Marketplace yet; install from the `.vsix`.
 
 The full status by phase is in the [README roadmap](../README.md#roadmap) and [PLAN.md](PLAN.md) (Portuguese).

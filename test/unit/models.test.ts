@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { mapModels, mapNotification, type ChatEvent } from "../../src/muse/events.ts";
+import { diffCatalog, mapModels, mapNotification, type ChatEvent } from "../../src/muse/events.ts";
 import { MuseSession } from "../../src/muse/session.ts";
 import { readReport } from "../fixtures/report.ts";
 
@@ -144,5 +144,112 @@ test("reasoning effort rides on each turn only when chosen", async () => {
     assert.equal("reasoningEffort" in (c ?? {}), false, "back to default: nothing sent");
   } finally {
     await t.done();
+  }
+});
+
+// ---- B1: a catalog that can be refreshed, that says when it is out of date, and that reports changes ----
+
+
+function runCatalog(env: Record<string, string>) {
+  const dir = mkdtempSync(join(tmpdir(), "antares-models-"));
+  const session = new MuseSession({ binary: process.execPath, binaryArgs: [fake], workspaceRoot: dir, profile: ":ask-me", env: { ...process.env, FAKE_MUSE_REPORT: join(dir, "report.json"), ...env } });
+  const events: ChatEvent[] = [];
+  session.on("event", (e: ChatEvent) => events.push(e));
+  const statuses = () => events.filter((e) => e.type === "modelsStatus");
+  return { session, events, statuses, done: async () => { await session.stop(); rmSync(dir, { recursive: true, force: true }); } };
+}
+
+test("diffCatalog names what was added and what is gone", () => {
+  const row = (modelId: string) => ({ modelId, label: modelId, isDefault: false, isActive: false, variants: [], effortNotes: {} });
+  assert.deepEqual(diffCatalog([row("a"), row("b")], [row("b"), row("c")]), { added: ["c"], removed: ["a"] });
+  assert.deepEqual(diffCatalog([row("a")], [row("a")]), { added: [], removed: [] });
+  assert.deepEqual(diffCatalog([], [row("a")]), { added: [], removed: [] }, "the first catalog is not a change");
+});
+
+test("a successful refresh says the catalog is current and where it came from", async () => {
+  const t = runCatalog({});
+  try {
+    await t.session.warm();
+    const s = t.statuses().at(-1);
+    assert.ok(s && s.type === "modelsStatus");
+    assert.equal(s.stale, false);
+    assert.equal(s.source, "providerCatalog");
+    assert.equal(typeof s.fetchedAtMs, "number");
+  } finally {
+    await t.done();
+  }
+});
+
+test("a refresh that fails keeps the last good catalog, marks it out of date and says why (once)", async () => {
+  const t = runCatalog({ FAKE_MUSE_LIST: "fail" });
+  try {
+    await t.session.warm();
+    const before = t.session.currentCatalog().length;
+    assert.equal(before, 2);
+    await t.session.refreshModels();
+    await t.session.refreshModels();
+    const s = t.statuses().at(-1);
+    assert.ok(s && s.type === "modelsStatus" && s.stale === true);
+    assert.match(s.error ?? "", /catalog backend unavailable/);
+    assert.equal(t.session.currentCatalog().length, 2, "the last good catalog stays");
+    const warnings = t.events.filter((e) => e.type === "notice" && e.level === "warning" && /model list/i.test(e.text));
+    assert.equal(warnings.length, 1, "one warning, not one per failed refresh");
+  } finally {
+    await t.done();
+  }
+});
+
+test("an empty reply after a good catalog is treated as out of date, not as 'no models'", async () => {
+  const t = runCatalog({ FAKE_MUSE_LIST: "empty" });
+  try {
+    await t.session.warm();
+    await t.session.refreshModels();
+    const s = t.statuses().at(-1);
+    assert.ok(s && s.type === "modelsStatus" && s.stale === true);
+    assert.match(s.error ?? "", /empty/i);
+    assert.equal(t.session.currentCatalog().length, 2);
+  } finally {
+    await t.done();
+  }
+});
+
+test("a catalog that gains or loses a model is announced, and the picker gets the new rows", async () => {
+  const dropped = runCatalog({ FAKE_MUSE_LIST: "drop" });
+  try {
+    await dropped.session.warm();
+    await dropped.session.refreshModels();
+    const note = dropped.events.find((e) => e.type === "notice" && /catalog changed/i.test(e.text));
+    assert.ok(note && note.type === "notice" && /no longer available: muse-spark-1\.2/.test(note.text), JSON.stringify(note));
+    assert.equal(dropped.session.currentCatalog().length, 1);
+  } finally {
+    await dropped.done();
+  }
+  const added = runCatalog({ FAKE_MUSE_LIST: "add" });
+  try {
+    await added.session.warm();
+    await added.session.refreshModels();
+    const note = added.events.find((e) => e.type === "notice" && /catalog changed/i.test(e.text));
+    assert.ok(note && note.type === "notice" && /new: muse-spark-2\.0/.test(note.text), JSON.stringify(note));
+  } finally {
+    await added.done();
+  }
+});
+
+test("a refresh that works again after a failure clears the out-of-date mark", async () => {
+  const t = runCatalog({ FAKE_MUSE_LIST: "fail", FAKE_MUSE_LIST_AFTER: "1" });
+  try {
+    await t.session.warm();
+    await t.session.refreshModels();
+    assert.equal((t.statuses().at(-1) as { stale: boolean }).stale, true);
+  } finally {
+    await t.done();
+  }
+  const ok = runCatalog({});
+  try {
+    await ok.session.warm();
+    await ok.session.refreshModels();
+    assert.equal((ok.statuses().at(-1) as { stale: boolean }).stale, false);
+  } finally {
+    await ok.done();
   }
 });

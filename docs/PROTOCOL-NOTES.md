@@ -202,3 +202,17 @@ Reported after the first use in a real project (a screenshot, no session data wa
 - `media/upload` on an **ephemeral** session (`--no-session-log`) answers `-32020` "session ... not found": the video store needs a durable session.
 - On a durable session the host validated the request: a wrong `totalBytes` is refused (`-32602`, "assembled bytes do not match totalBytes") and a media type other than `video/mp4` or `video/quicktime` is refused (`-32602`). A turn naming an upload that was never completed is refused with `-32038`.
 - The finalize of my synthetic file failed with `-32603` ("media/upload finalize failed"), cause unknown (probably content validation). So a successful upload and the shape of a user message with a video were **not observed**, and no video was sent to a model.
+
+## Observed: the 2026-11-02 audit (Muse 1.4.14, build dec7d749)
+
+All with throwaway config unless stated; the account was only read.
+
+- **The authoritative contract** is `muse schema generate-json-schema [--experimental]`: 70 stable methods, 105 with the experimental ones (fingerprint `c94c3d1f…` stable, `159e01dd…` experimental). `initialize` grantable capabilities include `sessionMcp`, `userShell`, `sessionListStream`, `feedback`, `computerUseSetup`, `sessionRename`.
+- **Models:** `model/list` rows carry `contextLimit`, `variants`, `defaultReasoningEffort`, `isDefault`, `isActive`; `cost` and `description` were empty; hidden rows never reach the wire, so a model the account cannot use is not listed. The `-contributor` ids in the API documentation are not in the subscription catalog.
+- **Contributor:** `settings/read` returns the **saved** `contributor_mode_enabled`, not the value in effect under `--contributor-mode`; the key is `hidden` but `settings/writeValue` accepts it (and rejects a non-boolean); a client cannot write `contributor_mode_disclosure_acknowledged`.
+- **Skills:** `muse skills list|inspect --json` carries `activation` (`on`, `user-invocable-only`, `off`); MSP's `skill/list` does not. The list calls the built-in scope `bundled`, the verbs `built-in`.
+- **MCP:** both `mcpServers` and `mcp_servers` are read; servers start at the first turn (not at `session/start`); `mcpServer/list` is empty for them; a child process receives only the explicit `env`; session-supplied servers need the `sessionMcp` capability and list with `source: "session"`. An ephemeral host (`--provider echo`) refuses a permission profile.
+- **Plugins:** `muse plugins inspect --json` carries `runtime_capabilities` with a status per hook / MCP server (`review_needed`, `trusted_enabled`, `trusted_disabled`); the selector kind is `mcp_server`; a disabled plugin lists none; an unchanged update keeps the approvals. `marketplace add` over Git works over HTTPS; entries using `git-subdir` are skipped, and some clones fail on Windows with extended paths.
+- **Web tools:** `tools.web_fetch.enabled` and `tools.web_search.mode` (`client`, `hosted`, `off`) are writable host settings.
+- **Muse Image:** nothing in the schema (no method, event or tool); the documentation describes an Images API with a key and per-image billing.
+- **Request size:** a request frame above about 8 MiB is refused with `-32002` (8 MiB passes, 10 MiB does not).

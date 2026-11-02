@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0
+
+Evolução em fases depois da auditoria de 2026-11-02 (detalhes e evidências em `docs/EVOLUCAO.md`):
+
+- Catálogo de modelos: erros deixam de ser engolidos, o último catálogo válido é mantido e marcado como possivelmente desatualizado, há o botão ↻ Models, e mudanças no catálogo ou o desaparecimento do modelo lembrado são avisados. Detalhes em `docs/EVOLUCAO.md`.
+
+- Modalidade Standard/Contributor (Fase B2): indicador somente leitura que diz "não confirmado" quando o valor salvo não prova o que está em vigor, diálogo de privacidade e troca para Standard com confirmação. Detalhes em `docs/EVOLUCAO.md`.
+
+- Gerenciador de skills (Fase C): lista com escopo, origem e estado de ativação reais (da CLI oficial), busca e filtro, ligar/desligar com leitura de volta, instalar de pasta com validação e confirmação, remover, avisos de nomes repetidos. Detalhes em `docs/EVOLUCAO.md`.
+
+- Gerenciador de MCP (Fase D): o painel de Connectors passa a listar os servidores do `settings.json` do Muse (o host não os mostra), com adicionar, editar, ligar/desligar e remover com confirmação, backup e gravação atômica, e um Test que pede ao próprio Muse que inicie o servidor sem usar modelo. Detalhes em `docs/EVOLUCAO.md`.
+
+- Gerenciador de plugins (Fase E): lista o que cada plugin traz e o estado de revisão de seus hooks e servidores MCP, aprovação/rejeição individual com aviso (nunca automática), habilitar/desabilitar, atualizar, remover e visão de marketplaces com atualizar/remover, tudo pela CLI oficial com confirmação e leitura de volta. Detalhes em `docs/EVOLUCAO.md`.
+
+- Catálogos sugeridos (Fase E2): marketplace oficial de plugins e coleção de skills da Anthropic, oferecidos (nunca adicionados sozinhos) com a oferta única na primeira abertura, e marketplaces próprios.
+- Acompanha o plano (B3): relê o catálogo de modelos quando o plano muda e ao voltar o foco.
+- Acesso à web (H): botão que mostra e altera `web_fetch` e `web_search` do Muse.
+- Pré-visualização (I): botão Preview abre no navegador do editor um servidor local ou um HTML da pasta servido somente leitura em 127.0.0.1.
+
 ## 0.1.4
 
 - **Fix: "Could not send the message: turn/start: frame exceeds the inbound limit (code -32002)" when several pictures are attached.** The host refuses a request above about 8 MiB (measured with `scripts/probe-frame-limit.ts`: 8 MiB passes, 10 MiB is refused) and Antares allowed 15 MB of pictures, which grow by a third as base64. The total is now 5.5 MB; a picture that does not fit in what is left is re-encoded as JPEG at a smaller size automatically, and an oversized request now gets a plain explanation.

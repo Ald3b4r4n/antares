@@ -11,18 +11,17 @@ Antares **does not configure or run a browser for you**. Muse Code controls a br
 
 ## What Antares cannot do
 
-- **Add, remove or edit an MCP server.** Muse's protocol has no setting for it (only nine host settings exist, none for MCP servers), so this is configuration you do in Muse itself.
+- **Control a browser by itself.** Antares can *add the MCP server for you* ("+" > Connectors > Add local server, with a confirmation, a backup and a Test), but it does not choose, install or run a browser server, and the agent clicking and typing is the MCP server's doing. The **Preview** button only opens a page for *you* in the editor's browser.
 - Run Computer Use setup. Muse describes that flow for macOS; what Windows offers is unknown.
 - See into a plugin or MCP server before it runs.
 
-## Where Muse reads MCP servers from (observed, partly)
+## Where Muse reads MCP servers (measured on Muse 1.4.14)
 
-Observed with Muse 1.4.14 in a throwaway config, through the CLI's own messages (`muse mcp login <server>`), not from documentation:
-
-- The user settings file is `settings.json` in Muse's config folder (`~/.config/muse/` on the test machine). It needs `"schema_version": 1`; without it Muse reports "malformed settings file".
-- Servers go under `mcpServers`, by name. A stdio server has `command` and `args`; a streamable-HTTP server has `type: "http"` and a `url`. Muse recognized both shapes, and said OAuth login applies only to the HTTP kind.
-- Not confirmed: that the Antares **Connectors** list shows a hand-written server (in the isolated trial it came back empty even though the CLI found the server), and the exact fields Muse supports beyond these. Check Muse's own documentation before relying on this.
-- That file sits next to your credentials (`auth.json`). Back it up before editing, and never paste it anywhere.
+- The user settings file is `settings.json` in Muse's config folder (`$XDG_CONFIG_HOME/muse/`, else `~/.config/muse/`). It needs `"schema_version": 1`.
+- Servers go under `mcpServers` **or** `mcp_servers` (Muse reads both; the documentation shows only `mcp_servers`). Each entry is `{transport: "stdio" | "streamable_http", command, args, env, framing | url, headers, mode: "required" | "optional", enabled}`.
+- Muse starts them at the **first turn** of a chat, and a `required` server that cannot start stops the run with a message. This was shown with a test server that received `initialize`, `tools/list` and a real `tools/call`, and with your own image server.
+- Muse's protocol method `mcpServer/list` does **not** list the servers defined in this file, so Antares reads the file itself (**Connectors**). Antares edits it only with a confirmation, a backup and an atomic write, and never shows a secret value.
+- That file sits next to your credentials (`auth.json`). Never paste it anywhere.
 
 ## Example shape (untested)
 

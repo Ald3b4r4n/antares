@@ -2,7 +2,7 @@
   "name": "antares",
   "displayName": "Antares",
   "description": "Open-source editor interface for the Muse Code agent, built on the official Muse Server Protocol (MSP).",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "publisher": "ald3b4r4n",
   "author": { "name": "Antonio Rafael Souza Cruz de Noronha", "url": "https://www.antoniorafael.com.br/" },
   "license": "MIT",
@@ -80,6 +80,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Development only: Muse provider id (e.g. `echo`) for offline testing. Leave empty for normal use."
+        },
+        "antares.offerCatalogs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer once to add a few suggested catalogs (Anthropic's official plugin marketplace and Anthropic's Agent Skills) so there is something to install from. Nothing is added unless you accept."
         },
         "antares.initialProfile": {
           "type": "string",
@@ -218,7 +223,7 @@
     "smoke": "node scripts/chat-smoke.ts",
     "preview": "node scripts/preview.ts",
     "test:editor": "node esbuild.mjs && node esbuild.test.mjs && node test/runTests.mjs",
-    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts test/unit/composer.test.ts test/unit/modes.test.ts test/unit/patches.test.ts test/unit/plugins.test.ts test/unit/oauth.test.ts test/unit/localimages.test.ts",
+    "test": "node --test test/unit/events.test.ts test/unit/session.test.ts test/unit/models.test.ts test/unit/contributor.test.ts test/unit/skillscli.test.ts test/unit/mcpsettings.test.ts test/unit/mcpprobe.test.ts test/unit/pluginscli.test.ts test/unit/catalogs.test.ts test/unit/planwatch.test.ts test/unit/websettings.test.ts test/unit/preview.test.ts test/unit/images.test.ts test/unit/usage.test.ts test/unit/sessions.test.ts test/unit/host.test.ts test/unit/real-approvals.test.ts test/unit/approval-flow.test.ts test/unit/voice.test.ts test/unit/composer.test.ts test/unit/modes.test.ts test/unit/patches.test.ts test/unit/plugins.test.ts test/unit/oauth.test.ts test/unit/localimages.test.ts",
     "test:e2e": "node esbuild.mjs && node scripts/e2e-editor.mjs"
   },
   "devDependencies": {

@@ -10,6 +10,15 @@ import type { OriginalProvider } from "./originalProvider.ts";
 import { MAX_IMAGE_BYTES, validateImages, type ImageInput } from "../muse/images.ts";
 import { loadWorkspaceImage } from "../muse/localImages.ts";
 import { listMcpServers } from "../muse/mcp.ts";
+import { testMcpServer } from "../muse/mcpProbe.ts";
+import { applyEdit, connectorRows, museConfigPath, parseMcpConfig, rawEntry, saveConfig, splitArgs, validateInput, type McpServerInput } from "../muse/mcpSettings.ts";
+import { fetchCollection, pendingSuggestions, scanSkills, SUGGESTED } from "../muse/catalogs.ts";
+import { extractLocalUrls, isPreviewableUrl, startPreviewServer, type PreviewServer } from "../muse/preview.ts";
+import { describeWeb, readWebSettings, setFetchEnabled, setSearchMode, type SearchMode, type WebSettings } from "../muse/webSettings.ts";
+import { PlanWatch, shouldRefreshCatalog } from "../muse/planWatch.ts";
+import { addMarketplace as addMarketplaceCli, decideCapability, listManagedPlugins, listMarketplaces, removeMarketplace, removePlugin, setPluginEnabled, updateMarketplace, updatePlugin, type CapabilityKind } from "../muse/pluginsCli.ts";
+import { findConflicts, installSkill, listManagedSkills, setSkillActivation, uninstallSkill, validateSkill, type CliOptions } from "../muse/skillsCli.ts";
+import { describeContributor, readContributor, switchToStandard, type ContributorState } from "../muse/contributor.ts";
 import { httpsOrigin, oauthSignIn, oauthSignOut } from "../muse/mcpLogin.ts";
 import { describeCapabilities, listAvailablePlugins, validatePlugin } from "../muse/pluginCli.ts";
 import { locateMuse } from "../muse/locate.ts";
@@ -51,6 +60,29 @@ type FromWebview =
   | { type: "openSession"; sessionId: string; mode: "resume" | "fork" }
   | { type: "setModel"; modelId: string }
   | { type: "setEffort"; effort?: string }
+  | { type: "refreshModels" }
+  | { type: "manageSkills" }
+  | { type: "pluginDecide"; pluginId: string; kind: string; capabilityId: string; decision: string }
+  | { type: "pluginEnable"; id: string; enabled: boolean }
+  | { type: "pluginUpdate"; id: string }
+  | { type: "pluginRemove"; id: string }
+  | { type: "listMarketplaces" }
+  | { type: "addSuggested"; name: string }
+  | { type: "browseCollection"; name: string }
+  | { type: "marketplaceUpdate"; name: string }
+  | { type: "marketplaceRemove"; name: string }
+  | { type: "mcpAdd"; kind: string }
+  | { type: "mcpEdit"; name: string }
+  | { type: "mcpRemove"; name: string }
+  | { type: "mcpToggle"; name: string; enabled: boolean }
+  | { type: "mcpTest"; name: string }
+  | { type: "setSkillActivation"; id: string; scope: string; activation: string }
+  | { type: "installSkillFolder" }
+  | { type: "uninstallSkill"; id: string }
+  | { type: "refreshContributor" }
+  | { type: "webMenu" }
+  | { type: "previewMenu" }
+  | { type: "showPrivacy" }
   | { type: "decide"; approvalId: string; choiceId: string; requirementId: unknown; feedback?: string }
   | { type: "copy"; text: string }
   | { type: "rendered"; messages: number; userMessages: number; codeBlocks: number; copyButtons: number };
@@ -64,6 +96,7 @@ export interface TestState {
   voice: { type: string; [k: string]: unknown }[];
 }
 
+const BLANK_LINE = String.fromCharCode(10, 10);
 const KNOWN_PROFILES = new Set(PROFILES.map((p) => p.id));
 
 /** The Antares chat panel: one webview, one Muse session at a time. */
@@ -132,7 +165,16 @@ export class ChatPanel {
     this.editorTracker = vscode.window.onDidChangeActiveTextEditor((e) => {
       if (e) this.lastEditor = e;
     });
+    // Following the subscription: a bigger plan can bring models, and the host only says so when asked. Read the list again when the
+    // window comes back to the front after ten minutes or more.
+    this.focusWatcher = vscode.window.onDidChangeWindowState((state) => {
+      if (!state.focused) return;
+      const session = this.session;
+      if (session && shouldRefreshCatalog({ lastReadMs: session.lastCatalogReadMs(), nowMs: Date.now(), minAgeMs: 10 * 60_000, turnRunning: session.busy, hostRunning: session.running })) void session.refreshModels();
+    });
     panel.onDidDispose(() => {
+      this.focusWatcher?.dispose();
+      void this.previewServer?.close();
       this.editorTracker?.dispose();
       ChatPanel.current = undefined;
       this.voice.dispose();
@@ -310,6 +352,75 @@ export class ChatPanel {
       case "setEffort":
         this.setEffort(message.effort);
         break;
+      case "refreshModels":
+        await this.refreshModels();
+        break;
+      case "manageSkills":
+        await this.manageSkills();
+        break;
+      case "pluginDecide":
+        await this.pluginDecide(message.pluginId, message.kind, message.capabilityId, message.decision);
+        break;
+      case "pluginEnable":
+        await this.pluginEnable(message.id, message.enabled === true);
+        break;
+      case "pluginUpdate":
+        await this.pluginUpdate(message.id);
+        break;
+      case "pluginRemove":
+        await this.pluginRemove(message.id);
+        break;
+      case "listMarketplaces":
+        await this.showMarketplaces();
+        break;
+      case "addSuggested":
+        await this.addSuggested(message.name);
+        break;
+      case "browseCollection":
+        await this.browseCollection(message.name);
+        break;
+      case "marketplaceUpdate":
+        await this.marketplaceUpdate(message.name);
+        break;
+      case "marketplaceRemove":
+        await this.marketplaceRemove(message.name);
+        break;
+      case "mcpAdd":
+        await this.mcpAdd(message.kind === "http" ? "streamable_http" : "stdio");
+        break;
+      case "mcpEdit":
+        await this.mcpEdit(message.name);
+        break;
+      case "mcpRemove":
+        await this.mcpRemove(message.name);
+        break;
+      case "mcpToggle":
+        await this.mcpToggle(message.name, message.enabled === true);
+        break;
+      case "mcpTest":
+        await this.mcpTest(message.name);
+        break;
+      case "setSkillActivation":
+        await this.changeSkillActivation(message.id, message.scope, message.activation);
+        break;
+      case "installSkillFolder":
+        await this.installSkillFolder();
+        break;
+      case "uninstallSkill":
+        await this.removeSkill(message.id);
+        break;
+      case "refreshContributor":
+        await this.refreshContributor();
+        break;
+      case "webMenu":
+        await this.webMenu();
+        break;
+      case "previewMenu":
+        await this.previewMenu();
+        break;
+      case "showPrivacy":
+        await this.showPrivacy();
+        break;
       case "decide":
         await this.decide(message);
         break;
@@ -317,6 +428,9 @@ export class ChatPanel {
         this.testState.ready++;
         this.postConfig();
         void this.warm();
+        void this.refreshContributor();
+        void this.refreshWeb();
+        void this.offerCatalogs();
         void this.refreshUsage(true);
         this.devToolDemo();
         break;
@@ -386,6 +500,195 @@ export class ChatPanel {
       if (this.session === session) this.session = undefined;
       return false;
     }
+  }
+
+  /** "↻ Models": asks the host for the catalog again (starting the host if needed). Failures are shown by the page, not thrown. */
+  private async refreshModels(): Promise<void> {
+    const session = this.ensureSession(true);
+    if (!session) return;
+    try {
+      if (session.running) await session.refreshModels();
+      else await session.warm();
+    } catch (error) {
+      this.notice("warning", `Could not refresh the model list: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /** Where `muse skills ...` runs: the located executable, in the open folder. Undefined (with the reason) when it cannot. */
+  private skillsCli(): { options: CliOptions } | { error: string } {
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
+    const cwd = this.workspaceFolder();
+    if (!binary) return { error: "Muse executable not found." };
+    if (!cwd) return { error: "Open a folder first." };
+    return { options: { binary, cwd } };
+  }
+
+  /** The skills manager: every skill Muse knows (scope, origin, activation) read from its own CLI. No model call. */
+  private async manageSkills(): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli) {
+      this.post({ type: "skillsManage", rows: [], conflicts: [], error: cli.error });
+      return;
+    }
+    try {
+      const rows = await listManagedSkills(cli.options);
+      this.post({ type: "skillsManage", rows, conflicts: [...findConflicts(rows).keys()] });
+    } catch (error) {
+      this.post({ type: "skillsManage", rows: [], conflicts: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** Turns one skill on, user-invocable-only or off. The result is read back; a skill change reaches new chats (an open one keeps its list). */
+  private async changeSkillActivation(id: unknown, scope: unknown, activation: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof id !== "string" || typeof scope !== "string" || (activation !== "on" && activation !== "userInvocableOnly" && activation !== "off")) {
+      this.notice("error", "Could not change the skill: " + ("error" in cli ? cli.error : "the request was not valid."));
+      return;
+    }
+    try {
+      await setSkillActivation(cli.options, { id, scope, activation });
+      this.notice("info", `${id} is now ${activation === "on" ? "on" : activation === "off" ? "off" : "user-invocable only"}. It applies to new chats; one already open keeps the skills it started with.`);
+    } catch (error) {
+      this.notice("error", `Could not change ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.manageSkills();
+  }
+
+  /** Installs a skill folder for the user: Muse checks it first, the user sees what it asks for and confirms. */
+  private async installSkillFolder(): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli) {
+      this.notice("error", cli.error);
+      return;
+    }
+    const dev = this.devPicks();
+    const picked = dev.length > 0 ? dev[0] : (await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: "Check this skill", title: "Pick a skill folder (it holds a SKILL.md)" }))?.[0]?.fsPath;
+    if (!picked) return;
+    try {
+      const preview = await validateSkill(cli.options, picked);
+      if (!preview.valid) {
+        this.notice("error", `Muse does not accept this folder as a skill: ${preview.diagnostics.join("; ") || "no reason given"}.`);
+        return;
+      }
+      const existing = (await listManagedSkills(cli.options)).some((s) => s.id === preview.id && s.scope === "user");
+      const detail = [
+        `Muse checked ${basename(picked)}: it is a valid skill${preview.id ? ` (${preview.id})` : ""}.`,
+        preview.allowedTools.length ? `It asks to use these tools: ${preview.allowedTools.join(", ")}.` : "",
+        preview.diagnostics.length ? `Notes: ${preview.diagnostics.join("; ")}.` : "",
+        existing ? "A skill with this name is already installed for you: installing replaces it." : "",
+        "A skill is a set of instructions the model follows: read its SKILL.md before you install it. Nothing has been installed yet.",
+      ].filter(Boolean).join(BLANK_LINE);
+      const go = existing ? "Replace" : "Install";
+      if ((await vscode.window.showInformationMessage(`Install the skill ${preview.id ?? basename(picked)}?`, { modal: true, detail }, go)) !== go) return;
+      const done = await installSkill(cli.options, picked, { force: existing });
+      this.notice("info", `Installed the skill ${done.id}. It appears in new chats.`);
+    } catch (error) {
+      this.notice("error", `Could not install the skill: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.manageSkills();
+  }
+
+  /** Removes a skill that was installed for the user, after a confirmation. */
+  private async removeSkill(id: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof id !== "string") return;
+    const go = "Remove";
+    if ((await vscode.window.showWarningMessage(`Remove the skill ${id}?`, { modal: true, detail: "This deletes the installed copy from Muse's skills folder. The folder you installed it from is not touched." }, go)) !== go) return;
+    try {
+      await uninstallSkill(cli.options, id);
+      this.notice("info", `Removed the skill ${id}.`);
+    } catch (error) {
+      this.notice("error", `Could not remove ${id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.manageSkills();
+  }
+
+  private web: WebSettings | undefined;
+
+  /** Reads the two web settings (a short-lived host, no model call) and shows them. */
+  private async refreshWeb(): Promise<void> {
+    const cli = this.skillsCli();
+    const read: WebSettings = "error" in cli ? { fetchEnabled: undefined, searchMode: undefined } : await readWebSettings(cli.options).catch(() => ({ fetchEnabled: undefined, searchMode: undefined }));
+    this.web = read;
+    this.post({ type: "web", ...describeWeb(read) });
+  }
+
+  /** Switches the agent's web tools. Each change is confirmed and checked against the host's answer. */
+  private async webMenu(): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli) {
+      this.notice("error", cli.error);
+      return;
+    }
+    if (!this.web) await this.refreshWeb();
+    const w = this.web ?? { fetchEnabled: undefined, searchMode: undefined };
+    const d = describeWeb(w);
+    type Item = vscode.QuickPickItem & { run: () => Promise<string> };
+    const items: Item[] = [
+      { label: w.fetchEnabled === false ? "Turn page reading on" : "Turn page reading off", description: "web_fetch: the agent reads a page you or it names", run: async () => { await setFetchEnabled(cli.options, w.fetchEnabled === false); return `Page reading is now ${w.fetchEnabled === false ? "on" : "off"}.`; } },
+      ...(["client", "hosted", "off"] as SearchMode[]).filter((m) => m !== w.searchMode).map((m) => ({ label: m === "off" ? "Turn searching off" : `Searching: ${m}`, description: `web_search mode "${m}" (the names are Muse's)`, run: async () => { await setSearchMode(cli.options, m); return `Searching is now "${m}".`; } })),
+    ];
+    const picked = await vscode.window.showQuickPick(items, { title: `${d.label}`, placeHolder: "Pick a change (it applies to new chats; the stricter permission modes still ask before reaching a site)" });
+    if (!picked) return;
+    const go = "Change";
+    if ((await vscode.window.showWarningMessage(`${picked.label}?`, { modal: true, detail: "This changes Muse's own setting, saved on this computer, for every Muse client here. It applies to new chats." }, go)) !== go) return;
+    try {
+      this.notice("info", await picked.run());
+    } catch (error) {
+      this.notice("error", `Could not change it: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.refreshWeb();
+  }
+
+  private contributor: ContributorState | undefined;
+
+  /** Reads the saved Standard/Contributor mode (a short-lived host, no model call, nothing written) and shows it. */
+  private async refreshContributor(): Promise<void> {
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
+    const root = this.workspaceFolder();
+    if (!binary || !root) {
+      this.contributor = describeContributor({ saved: undefined, error: !binary ? "the Muse executable was not found" : "no folder is open" }, process.env);
+    } else {
+      const read = await readContributor({ binary, cwd: root, clientVersion: (this.context.extension.packageJSON as { version?: string }).version }).catch((error: unknown) => ({ saved: undefined, error: error instanceof Error ? error.message : String(error) }));
+      this.contributor = describeContributor(read, process.env);
+    }
+    this.post({ type: "contributor", state: this.contributor });
+  }
+
+  /** Explains the mode and what it rests on. Read-only: Antares does not change the mode (change it in Muse: /settings, Contributor mode). */
+  private async showPrivacy(): Promise<void> {
+    if (!this.contributor) await this.refreshContributor();
+    const s = this.contributor;
+    if (!s) return;
+    const lines = [s.account ? `Account: ${s.account}` : "", `${s.label}. ${s.detail}`, s.privacy, "Antares can switch Muse to Standard (after one more confirmation). Turning Contributor on is done in Muse itself: run it and open /settings, then the Contributor mode row, where Muse shows you its data-use disclosure."].filter(Boolean);
+    const toStandard = "Switch to Standard…";
+    const choice = await vscode.window.showInformationMessage(`Muse usage mode: ${s.label}`, { modal: true, detail: lines.join(BLANK_LINE) }, ...(s.mode === "standard" ? [] : [toStandard]), "Read the terms");
+    if (choice === "Read the terms") void vscode.env.openExternal(vscode.Uri.parse("https://dev.meta.ai/docs/muse-code/subscriptions"));
+    else if (choice === toStandard) await this.confirmStandard();
+  }
+
+  /** The only switch Antares offers is toward Standard, after an explicit confirmation. Turning Contributor on happens in Muse. */
+  private async confirmStandard(): Promise<void> {
+    const confirm = "Switch to Standard";
+    const answer = await vscode.window.showWarningMessage(
+      "Switch Muse to Standard mode?",
+      { modal: true, detail: ["This changes the setting saved on this computer in Muse's own settings, so it applies to every Muse client here (the terminal and other editors too).", "Standard mode keeps your content from being used to train Meta models; your plan may give you less usage than Contributor mode does.", "Muse's documentation says the change applies from your next request. Antares has not verified what an already open session does."].join(BLANK_LINE) },
+      confirm,
+    );
+    if (answer !== confirm) return;
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
+    const root = this.workspaceFolder();
+    if (!binary || !root) {
+      this.notice("error", "Could not switch the mode: " + (!binary ? "the Muse executable was not found." : "open a folder first."));
+      return;
+    }
+    try {
+      await switchToStandard({ binary, cwd: root, clientVersion: (this.context.extension.packageJSON as { version?: string }).version });
+      this.notice("info", "Muse is now saved as Standard mode. It applies from your next request.");
+    } catch (error) {
+      this.notice("error", `Could not switch the mode: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.refreshContributor();
   }
 
   /** Starts the host quietly so the model picker has a catalog before the first message. No model call. */
@@ -506,7 +809,8 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     });
     session.on("event", (event: ChatEvent) => {
       if (event.type === "models" && this.modelId && event.models.length > 0 && !event.models.some((m) => m.modelId === this.modelId)) {
-        // The remembered model is gone from the catalog: forget it rather than show a stale choice.
+        // The remembered model is gone from the catalog: forget it rather than show a stale choice, and say so.
+        this.notice("warning", `The model ${this.modelId} you used before is no longer available to this account; the default model is selected instead.`);
         this.modelId = undefined;
         this.effort = undefined;
         this.remember();
@@ -522,6 +826,13 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       if (event.type === "session") this.currentSessionId = event.sessionId;
       if (event.type === "turnStarted" || (event.type === "history" && event.events.length > 0)) this.hasConversation = true;
       const extras = this.tracker.handle(event);
+      if (event.type === "usage") {
+        const seen = this.planWatch.observe(this.tracker.latest()?.plan);
+        if (seen.changed) {
+          this.notice("info", `Your Muse plan changed (${seen.from} to ${seen.to}). Reading the model list again: models your new plan includes will appear in the picker.`);
+          void session.refreshModels();
+        }
+      }
       this.post({ type: "event", event: event.type === "usage" ? (this.tracker.latest() ?? event) : event });
       for (const extra of extras) this.post({ type: "event", event: extra });
       this.afterEvent(event);
@@ -574,7 +885,78 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
   }
 
   /** Reads the patch of a finished file tool call (also those replayed from history) and sends it to the page. */
+  /** Local addresses a tool printed (a dev server's banner), newest last, so Preview can offer them. */
+  private localUrls: string[] = [];
+  private previewServer: PreviewServer | undefined;
+  private previewConfirmed = false;
+
+  private noteLocalUrls(output: string | undefined): void {
+    if (!output) return;
+    const fresh = extractLocalUrls(output).filter((u) => !this.localUrls.includes(u));
+    if (fresh.length === 0) return;
+    this.localUrls = [...this.localUrls, ...fresh].slice(-5);
+    this.post({ type: "previewUrls", urls: this.localUrls });
+  }
+
+  /** Opens an address in the editor's built-in browser (Simple Browser); in an editor without it, in the system browser. */
+  private async openPreview(url: string): Promise<void> {
+    if (!isPreviewableUrl(url)) {
+      this.notice("error", "Only http and https addresses can be previewed.");
+      return;
+    }
+    try {
+      await vscode.commands.executeCommand("simpleBrowser.show", url);
+      this.notice("info", `Opened ${url} in the editor's browser.`);
+    } catch {
+      this.notice("warning", "This editor has no built-in browser, so the page opens in your system browser.");
+      await vscode.env.openExternal(vscode.Uri.parse(url));
+    }
+  }
+
+  /** Preview: a dev server address the agent printed, an address you type, or an HTML file of this folder (served read-only on 127.0.0.1). */
+  private async previewMenu(): Promise<void> {
+    type Item = vscode.QuickPickItem & { act: "url" | "type" | "file"; url?: string };
+    const items: Item[] = [
+      ...[...this.localUrls].reverse().map((u): Item => ({ label: u, description: "printed by the agent's tools", act: "url", url: u })),
+      { label: "Open an address…", description: "any http or https address", act: "type" },
+      { label: "Preview an HTML file from this folder…", description: "served read-only on 127.0.0.1 while this chat is open", act: "file" },
+    ];
+    const picked = await vscode.window.showQuickPick(items, { title: "Preview a page in the editor", placeHolder: "Pick what to open" });
+    if (!picked) return;
+    if (picked.act === "url" && picked.url) return this.openPreview(picked.url);
+    if (picked.act === "type") {
+      const url = await vscode.window.showInputBox({ title: "Open an address in the editor", prompt: "http or https", value: this.localUrls.at(-1) ?? "http://localhost:3000/", validateInput: (v) => (isPreviewableUrl(v) ? undefined : "Use an http:// or https:// address.") });
+      if (url) await this.openPreview(url);
+      return;
+    }
+    const root = this.workspaceFolder();
+    if (!root) {
+      this.notice("error", "Open a folder first.");
+      return;
+    }
+    const files = await vscode.workspace.findFiles("**/*.{html,htm}", "**/{node_modules,.git,dist-test}/**", 200);
+    if (files.length === 0) {
+      this.notice("info", "There is no HTML file in this folder to preview.");
+      return;
+    }
+    const rels = files.map((f) => vscode.workspace.asRelativePath(f, false).replace(/\\/g, "/")).sort();
+    const rel = await vscode.window.showQuickPick(rels, { title: "Which page?", placeHolder: "The whole folder is served, so the page's CSS, scripts and images load" });
+    if (!rel) return;
+    if (!this.previewConfirmed) {
+      const go = "Serve and preview";
+      if ((await vscode.window.showInformationMessage("Serve this folder for the preview?", { modal: true, detail: `Antares will serve ${root} read-only on 127.0.0.1 (this computer only) while this chat is open, so the page's own files load. Dotfiles such as .env and .git are never served.` }, go)) !== go) return;
+      this.previewConfirmed = true;
+    }
+    try {
+      this.previewServer ??= await startPreviewServer(root);
+      await this.openPreview(this.previewServer.baseUrl + rel.split("/").map(encodeURIComponent).join("/"));
+    } catch (error) {
+      this.notice("error", `Could not start the preview: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private afterEvent(event: ChatEvent): void {
+    if (event.type === "toolCall" && event.status === "completed") this.noteLocalUrls(event.output);
     if (event.type === "toolCall" && event.patchRef && event.status === "completed") void this.showPatch(event.itemId, event.patchRef);
     if (event.type === "history") for (const past of event.events) if (past.type === "toolCall" && past.patchRef && past.status === "completed") void this.showPatch(past.itemId, past.patchRef);
   }
@@ -805,6 +1187,8 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
   /** The last text editor the user looked at: the chat's own webview takes focus away from the active one. */
   private lastEditor: vscode.TextEditor | undefined;
   private editorTracker: vscode.Disposable | undefined;
+  private focusWatcher: vscode.Disposable | undefined;
+  private readonly planWatch = new PlanWatch();
 
   private editorForContext(): vscode.TextEditor | undefined {
     return vscode.window.activeTextEditor ?? this.lastEditor ?? vscode.window.visibleTextEditors.find((e) => e.document.uri.scheme === "file");
@@ -1043,16 +1427,235 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     } catch (error) {
       this.notice("error", `Could not add the marketplace: ${error instanceof Error ? error.message : String(error)}`);
     }
+    await this.showMarketplaces();
   }
 
   private async listPlugins(): Promise<void> {
     const session = this.ensureSession(true) ?? this.ensureSession(false);
     if (!session) return;
+    // Muse's own CLI says far more than MSP (what each plugin brings, the review state of its hooks and MCP servers); MSP's list is the fallback.
+    const cli = this.skillsCli();
+    if (!("error" in cli)) {
+      try {
+        this.post({ type: "extras", kind: "plugins", rich: true, rows: await listManagedPlugins(cli.options) });
+        return;
+      } catch {
+        /* fall back to the host's list below */
+      }
+    }
     try {
       this.post({ type: "extras", kind: "plugins", rows: await session.listPlugins() });
     } catch (error) {
       this.post({ type: "extras", kind: "plugins", rows: [], error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  /** Runs one plugin change after the user confirmed it, reports the outcome, and redraws the list. */
+  private async pluginChange(confirm: { title: string; detail: string; button: string; warn?: boolean }, act: () => Promise<string>): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli) {
+      this.notice("error", cli.error);
+      return;
+    }
+    const show = confirm.warn ? vscode.window.showWarningMessage : vscode.window.showInformationMessage;
+    if ((await show(confirm.title, { modal: true, detail: confirm.detail }, confirm.button)) !== confirm.button) return;
+    try {
+      this.notice("info", await act());
+    } catch (error) {
+      this.notice("error", `${confirm.title.replace(/\?$/, "")} failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.listPlugins();
+  }
+
+  /** Approves or rejects ONE code-running part of a plugin, after showing exactly what it is. Nothing is ever approved automatically. */
+  private async pluginDecide(pluginId: unknown, kind: unknown, capabilityId: unknown, decision: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof pluginId !== "string" || typeof capabilityId !== "string" || (decision !== "approve" && decision !== "reject") || (kind !== "hook" && kind !== "mcp_server")) return;
+    const plugin = (await listManagedPlugins(cli.options).catch(() => [])).find((p) => p.id === pluginId);
+    const part = plugin?.runtime.find((r) => r.kind === kind && r.capabilityId === capabilityId);
+    if (!plugin || !part) {
+      this.notice("error", `Could not find ${capabilityId} in ${pluginId}. Reload the list.`);
+      return;
+    }
+    const what = kind === "hook" ? "hook" : "MCP server";
+    const approve = decision === "approve";
+    await this.pluginChange(
+      {
+        title: `${approve ? "Approve" : "Reject"} the ${what} of ${plugin.name}?`,
+        detail: [
+          `${what[0]!.toUpperCase()}${what.slice(1)}: ${part.detail || part.capabilityId}`,
+          approve
+            ? `Approving lets Muse run this on your computer, with your permissions and outside Muse's sandbox, every time it applies. Approve only what you have read and trust. The approval covers this exact definition: if the plugin changes it, you are asked again.`
+            : `Rejecting keeps it from running. You can approve it later.`,
+        ].join(BLANK_LINE),
+        button: approve ? "Approve" : "Reject",
+        warn: approve,
+      },
+      async () => {
+        await decideCapability(cli.options, { pluginId, kind: kind as Exclude<CapabilityKind, "unknown">, capabilityId, decision });
+        return `${approve ? "Approved" : "Rejected"} the ${what} of ${pluginId}. It applies to new chats.`;
+      },
+    );
+  }
+
+  private async pluginEnable(id: unknown, enabled: boolean): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof id !== "string") return;
+    await this.pluginChange(
+      { title: `${enabled ? "Enable" : "Disable"} the plugin ${id}?`, detail: enabled ? "Its skills become available in new chats, and any hooks or MCP servers you already approved run again." : "Muse stops loading it in new chats. It stays installed with your approvals.", button: enabled ? "Enable" : "Disable" },
+      async () => {
+        await setPluginEnabled(cli.options, id, enabled);
+        return `${id} is now ${enabled ? "enabled" : "disabled"}. It applies to new chats.`;
+      },
+    );
+  }
+
+  private async pluginUpdate(id: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof id !== "string") return;
+    await this.pluginChange(
+      { title: `Update the plugin ${id}?`, detail: "Muse copies it again from the place it was installed from. If a hook or MCP server changed, it must be approved again before it runs.", button: "Update" },
+      async () => {
+        await updatePlugin(cli.options, id);
+        return `Updated ${id}. Check the list: a changed hook or MCP server waits for your review.`;
+      },
+    );
+  }
+
+  private async pluginRemove(id: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof id !== "string") return;
+    await this.pluginChange(
+      { title: `Remove the plugin ${id}?`, detail: "Muse removes the installed plugin and its cached copy. Its own data folder is kept. The folder it was installed from is not touched.", button: "Remove", warn: true },
+      async () => {
+        await removePlugin(cli.options, id, { deleteData: false });
+        return `Removed ${id}.`;
+      },
+    );
+  }
+
+  /** The marketplaces view: the catalogs plugins can be installed from. */
+  private async showMarketplaces(): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli) {
+      this.post({ type: "extras", kind: "marketplaces", rows: [], error: cli.error });
+      return;
+    }
+    try {
+      const rows = await listMarketplaces(cli.options);
+      this.post({ type: "extras", kind: "marketplaces", rows, suggested: pendingSuggestions(rows).map((s) => ({ name: s.name, title: s.title, kind: s.kind, note: s.note, source: s.source })) });
+    } catch (error) {
+      this.post({ type: "extras", kind: "marketplaces", rows: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  /** Shown once per install (and never if the user turned it off): the suggested catalogs are offered, never added silently. */
+  private async offerCatalogs(): Promise<void> {
+    if (!vscode.workspace.getConfiguration("antares").get<boolean>("offerCatalogs", true)) return;
+    if (this.context.globalState.get<boolean>("antares.catalogsOffered")) return;
+    await this.context.globalState.update("antares.catalogsOffered", true);
+    const choice = await vscode.window.showInformationMessage(
+      "Antares can start you off with two catalogs: Anthropic's official plugins marketplace and Anthropic's Agent Skills. Nothing is added unless you choose, and you can add your own anytime.",
+      "Look at them",
+      "Not now",
+    );
+    if (choice === "Look at them") this.post({ type: "openExtras", kind: "marketplaces" });
+  }
+
+  /** Adds one suggested plugin marketplace to Muse, after a confirmation that says where it comes from and what to expect. */
+  private async addSuggested(name: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    const s = SUGGESTED.find((x) => x.name === name && x.kind === "plugins");
+    if ("error" in cli || !s) return;
+    const go = "Add catalog";
+    if ((await vscode.window.showInformationMessage(`Add ${s.title}?`, { modal: true, detail: [`Source: ${s.source}`, s.note, "This adds a catalog to Muse's configuration. It installs no plugin by itself."].join(BLANK_LINE) }, go)) !== go) return;
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Adding ${s.title}…` }, async () => {
+      try {
+        const done = await addMarketplaceCli(cli.options, s.name, s.source);
+        this.notice("info", `Added ${s.title}: ${done.pluginCount} plugin${done.pluginCount === 1 ? "" : "s"} Muse can use, ${done.skipped} skipped by Muse. Nothing was installed.`);
+      } catch (error) {
+        this.notice("error", `Could not add ${s.title}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
+    await this.showMarketplaces();
+  }
+
+  /** A skills collection: downloaded into a throwaway folder, the skills listed, the chosen ones validated by Muse and installed after a confirmation. */
+  private async browseCollection(name: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    const s = SUGGESTED.find((x) => x.name === name && x.kind === "skills");
+    if ("error" in cli || !s) return;
+    let fetched: Awaited<ReturnType<typeof fetchCollection>> | undefined;
+    try {
+      fetched = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Downloading ${s.title}…` }, () => fetchCollection(s.source));
+      const skills = await scanSkills(fetched.dir);
+      if (skills.length === 0) {
+        this.notice("info", "No skills were found in that collection.");
+        return;
+      }
+      const picked = await vscode.window.showQuickPick(
+        skills.map((k) => ({ label: k.name, description: k.relativePath.replace(/\\/g, "/"), detail: k.description, skill: k })),
+        { title: `${s.title}: pick the skills to install`, placeHolder: "Nothing is installed until you confirm on the next step", canPickMany: true, matchOnDetail: true },
+      );
+      if (!picked || picked.length === 0) return;
+      const checks = [];
+      for (const p of picked) checks.push({ p, preview: await validateSkill(cli.options, p.skill.dir) });
+      const bad = checks.filter((c) => !c.preview.valid);
+      const good = checks.filter((c) => c.preview.valid);
+      if (good.length === 0) {
+        this.notice("error", `Muse does not accept any of the chosen skills: ${bad.map((c) => `${c.p.label} (${c.preview.diagnostics[0] ?? "no reason"})`).join("; ")}.`);
+        return;
+      }
+      const detail = [
+        `Muse checked them and accepts: ${good.map((c) => c.p.label).join(", ")}.`,
+        bad.length ? `Muse does not accept: ${bad.map((c) => c.p.label).join(", ")}. They are left out.` : "",
+        ...good.filter((c) => c.preview.allowedTools.length).map((c) => `${c.p.label} asks to use: ${c.preview.allowedTools.join(", ")}.`),
+        "A skill is a set of instructions the model follows. These come from a public repository you do not control: read a skill before relying on it. Nothing has been installed yet.",
+      ].filter(Boolean).join(BLANK_LINE);
+      const go = `Install ${good.length}`;
+      if ((await vscode.window.showInformationMessage(`Install ${good.length} skill${good.length === 1 ? "" : "s"} from ${s.title}?`, { modal: true, detail }, go)) !== go) return;
+      const done: string[] = [];
+      const skipped: string[] = [];
+      for (const c of good) {
+        try {
+          await installSkill(cli.options, c.p.skill.dir, { force: false });
+          done.push(c.p.label);
+        } catch (error) {
+          skipped.push(`${c.p.label} (${error instanceof Error ? error.message : String(error)})`);
+        }
+      }
+      this.notice(skipped.length ? "warning" : "info", `Installed ${done.length} skill${done.length === 1 ? "" : "s"}${done.length ? `: ${done.join(", ")}` : ""}.${skipped.length ? ` Not installed: ${skipped.join("; ")}.` : ""} They appear in new chats.`);
+    } catch (error) {
+      this.notice("error", error instanceof Error ? error.message : String(error));
+    } finally {
+      await fetched?.cleanup();
+    }
+  }
+
+  private async marketplaceUpdate(name: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof name !== "string") return;
+    try {
+      await updateMarketplace(cli.options, name);
+      this.notice("info", `Refreshed the marketplace ${name}. Nothing was installed.`);
+    } catch (error) {
+      this.notice("error", `Could not refresh ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.showMarketplaces();
+  }
+
+  private async marketplaceRemove(name: unknown): Promise<void> {
+    const cli = this.skillsCli();
+    if ("error" in cli || typeof name !== "string") return;
+    const go = "Remove";
+    if ((await vscode.window.showWarningMessage(`Remove the marketplace ${name}?`, { modal: true, detail: "Muse forgets this catalog and its snapshot. Plugins already installed from it stay installed." }, go)) !== go) return;
+    try {
+      await removeMarketplace(cli.options, name);
+      this.notice("info", `Removed the marketplace ${name}.`);
+    } catch (error) {
+      this.notice("error", `Could not remove ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.showMarketplaces();
   }
 
   // ---- connectors: OAuth sign-in and sign-out, run by the host; Antares never sees a credential ----
@@ -1127,11 +1730,171 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       this.post({ type: "extras", kind: "connectors", rows: [], error: !binary ? "Muse executable not found." : "Open a folder first." });
       return;
     }
+    // The file is the source for the servers it defines (the host's list does not show them); the host adds the sign-in
+    // state and the servers that come from plugins and sessions. A host that cannot answer does not hide the file's servers.
+    const file = await this.readMcpFile();
+    const hostRows = await listMcpServers({ binary, cwd: root, clientVersion: (this.context.extension.packageJSON as { version?: string }).version }).catch(() => []);
+    this.post({ type: "extras", kind: "connectors", rows: connectorRows(file.config, hostRows), file: { path: file.config.path, key: file.config.key, warnings: file.config.warnings, parseError: file.config.parseError } });
+  }
+
+  /** The user's Muse settings file and what it says about MCP servers. */
+  private async readMcpFile(): Promise<{ text: string | undefined; config: ReturnType<typeof parseMcpConfig> }> {
+    const path = museConfigPath(process.env);
+    let text: string | undefined;
     try {
-      this.post({ type: "extras", kind: "connectors", rows: await listMcpServers({ binary, cwd: root, clientVersion: (this.context.extension.packageJSON as { version?: string }).version }) });
+      text = await readFile(path, "utf8");
     } catch (error) {
-      this.post({ type: "extras", kind: "connectors", rows: [], error: error instanceof Error ? error.message : String(error) });
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    return { text, config: parseMcpConfig(text, path) };
+  }
+
+  /** Shows what will change (never a secret value), asks, then saves with a backup. Returns whether it was saved. */
+  private async confirmAndSave(title: string, detail: string[], build: (text: string | undefined) => string): Promise<boolean> {
+    const file = await this.readMcpFile();
+    if (file.config.parseError) {
+      this.notice("error", `${file.config.parseError} Fix the file first: ${file.config.path}`);
+      return false;
+    }
+    let next: string;
+    try {
+      next = build(file.text);
+    } catch (error) {
+      this.notice("error", error instanceof Error ? error.message : String(error));
+      return false;
+    }
+    const go = "Save";
+    const body = [...detail, `This edits Muse's settings file for every Muse client on this computer: ${file.config.path}`, file.config.exists ? "A backup of the current file is kept next to it." : "The file does not exist yet and will be created."].join(BLANK_LINE);
+    if ((await vscode.window.showWarningMessage(title, { modal: true, detail: body }, go)) !== go) return false;
+    try {
+      const { backup } = await saveConfig(file.config.path, next, file.config.fingerprint);
+      this.notice("info", `Saved to Muse's settings${backup ? ` (backup: ${basename(backup)})` : ""}. It applies to new chats; one already open keeps the servers it started with.`);
+      return true;
+    } catch (error) {
+      this.notice("error", `Could not save: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /** Asks for KEY / value pairs one at a time. Values are typed in a masked box and never shown again. */
+  private async askPairs(what: "environment variable" | "header"): Promise<Record<string, string> | undefined> {
+    const out: Record<string, string> = {};
+    for (;;) {
+      const key = await vscode.window.showInputBox({ title: `Add a ${what}? (optional)`, prompt: `${what[0]!.toUpperCase()}${what.slice(1)} name. Leave empty to finish.`, ignoreFocusOut: true });
+      if (key === undefined) return undefined;
+      if (key.trim() === "") return out;
+      const value = await vscode.window.showInputBox({ title: `Value of ${key}`, prompt: "Typed hidden and stored in Muse's settings file. To keep the secret out of the file, type a reference such as ${MY_VARIABLE} that Muse resolves from the environment.", password: true, ignoreFocusOut: true });
+      if (value === undefined) return undefined;
+      out[key.trim()] = value;
+    }
+  }
+
+  private async mcpAdd(transport: "stdio" | "streamable_http"): Promise<void> {
+    const file = await this.readMcpFile();
+    const taken = new Set(file.config.entries.map((e) => e.name));
+    const name = await vscode.window.showInputBox({ title: "New MCP server: name", prompt: "Letters, digits, dot, dash and underscore.", ignoreFocusOut: true, validateInput: (v) => (taken.has(v) ? "A server with this name already exists." : validateInput({ name: v, transport: "stdio", command: "x" }).find((p) => /name/.test(p))) });
+    if (!name) return;
+    let input: McpServerInput;
+    if (transport === "stdio") {
+      const command = await vscode.window.showInputBox({ title: `${name}: command`, prompt: "The program Muse will start (a path or a name on your PATH).", ignoreFocusOut: true });
+      if (!command) return;
+      const args = await vscode.window.showInputBox({ title: `${name}: arguments (optional)`, prompt: "Separated by spaces; use quotes for an argument with spaces.", ignoreFocusOut: true });
+      if (args === undefined) return;
+      const env = await this.askPairs("environment variable");
+      if (!env) return;
+      input = { name, transport: "stdio", command, ...(args.trim() ? { args: splitArgs(args) } : {}), ...(Object.keys(env).length ? { env } : {}) };
+    } else {
+      const url = await vscode.window.showInputBox({ title: `${name}: URL`, prompt: "The server's streamable-HTTP endpoint (http or https).", ignoreFocusOut: true });
+      if (!url) return;
+      const headers = await this.askPairs("header");
+      if (!headers) return;
+      input = { name, transport: "streamable_http", url, ...(Object.keys(headers).length ? { headers } : {}) };
+    }
+    const mode = await vscode.window.showQuickPick([{ label: "optional", description: "if it cannot start, Muse skips it with a warning (recommended)" }, { label: "required", description: "if it cannot start, the chat run stops" }], { title: `${name}: what if it cannot start?`, ignoreFocusOut: true });
+    if (!mode) return;
+    input = { ...input, mode: mode.label as "optional" | "required" };
+    const problems = validateInput(input);
+    if (problems.length) {
+      this.notice("error", problems.join(" "));
+      return;
+    }
+    const detail = [
+      input.transport === "stdio"
+        ? `This program will run on this computer, with your permissions, every time Muse starts a chat: ${input.command}${input.args?.length ? ` (${input.args.length} argument${input.args.length === 1 ? "" : "s"})` : ""}. MCP tools are not sandboxed. Only add servers you trust.`
+        : `Muse will connect to ${(() => { try { return new URL(input.url).origin; } catch { return input.url; } })()}. MCP tools are not sandboxed. Only add servers you trust.`,
+      `Mode: ${input.mode}.`,
+      input.transport === "stdio" && input.env ? `Environment variables: ${Object.keys(input.env).join(", ")} (values hidden).` : "",
+      input.transport === "streamable_http" && input.headers ? `Headers: ${Object.keys(input.headers).join(", ")} (values hidden).` : "",
+    ].filter(Boolean);
+    if (await this.confirmAndSave(`Add the MCP server "${name}"?`, detail, (text) => applyEdit(text, { op: "upsert", input }))) await this.listConnectors();
+  }
+
+  private async mcpEdit(name: unknown): Promise<void> {
+    if (typeof name !== "string") return;
+    const file = await this.readMcpFile();
+    const entry = file.config.entries.find((e) => e.name === name);
+    const raw = rawEntry(file.text, name);
+    if (!entry || !raw) {
+      this.notice("error", `There is no server named "${name}" in the settings file.`);
+      return;
+    }
+    let input: McpServerInput;
+    if (entry.transport === "stdio") {
+      const command = await vscode.window.showInputBox({ title: `${name}: command`, value: entry.command ?? "", ignoreFocusOut: true });
+      if (!command) return;
+      const quote = (a: string) => (/\s/.test(a) ? `"${a}"` : a);
+      const args = await vscode.window.showInputBox({ title: `${name}: arguments`, value: entry.args.map(quote).join(" "), prompt: "Environment variables are kept as they are.", ignoreFocusOut: true });
+      if (args === undefined) return;
+      input = { name, transport: "stdio", command, args: splitArgs(args) };
+    } else if (entry.transport === "streamable_http") {
+      const url = await vscode.window.showInputBox({ title: `${name}: URL`, value: entry.url ?? "", prompt: "Headers are kept as they are.", ignoreFocusOut: true });
+      if (!url) return;
+      input = { name, transport: "streamable_http", url };
+    } else {
+      this.notice("error", `"${name}" has no valid transport, so Antares cannot edit it safely. Fix it in the settings file: ${file.config.path}`);
+      return;
+    }
+    const mode = await vscode.window.showQuickPick([{ label: "optional" }, { label: "required" }], { title: `${name}: what if it cannot start?`, placeHolder: `now: ${entry.mode}`, ignoreFocusOut: true });
+    if (!mode) return;
+    input = { ...input, mode: mode.label as "optional" | "required" };
+    const problems = validateInput(input);
+    if (problems.length) {
+      this.notice("error", problems.join(" "));
+      return;
+    }
+    const target = input.transport === "stdio" ? input.command : (() => { try { return new URL(input.url).origin; } catch { return input.url; } })();
+    if (await this.confirmAndSave(`Change the MCP server "${name}"?`, [`New target: ${target}. Mode: ${input.mode}.`, "Environment variables, headers and any other fields of this server are kept."], (text) => applyEdit(text, { op: "upsert", input }))) await this.listConnectors();
+  }
+
+  private async mcpRemove(name: unknown): Promise<void> {
+    if (typeof name !== "string") return;
+    if (await this.confirmAndSave(`Remove the MCP server "${name}"?`, ["The server's entry, including any secrets stored in it, is removed from Muse's settings. The backup keeps the old file."], (text) => applyEdit(text, { op: "remove", name }))) await this.listConnectors();
+  }
+
+  private async mcpToggle(name: unknown, enabled: boolean): Promise<void> {
+    if (typeof name !== "string") return;
+    if (await this.confirmAndSave(`${enabled ? "Enable" : "Disable"} the MCP server "${name}"?`, [enabled ? "Muse will start it again in new chats." : "Muse will not start it in new chats. Its configuration stays in the file."], (text) => applyEdit(text, { op: "setEnabled", name, enabled }))) await this.listConnectors();
+  }
+
+  /** Asks Muse to start this one server in a clean config (no model call). It runs the configured program, so it asks first. */
+  private async mcpTest(name: unknown): Promise<void> {
+    if (typeof name !== "string") return;
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
+    const file = await this.readMcpFile();
+    const raw = rawEntry(file.text, name);
+    if (!binary || !raw) {
+      this.notice("error", !binary ? "Muse executable not found." : `There is no server named "${name}" in the settings file.`);
+      return;
+    }
+    const stdio = raw.transport === "stdio";
+    const go = "Test";
+    const detail = stdio
+      ? `Muse will start this program on your computer, in a clean configuration: ${String(raw.command)}. It makes no model call. It checks that the server starts and answers; it does not prove a tool call works, and it cannot see files or sign-ins in your own home folder.`
+      : "Muse will try to connect to this server in a clean configuration, so a saved sign-in is not used. It makes no model call.";
+    if ((await vscode.window.showWarningMessage(`Test the MCP server "${name}"?`, { modal: true, detail }, go)) !== go) return;
+    this.post({ type: "mcpTestResult", name, running: true });
+    const result = await testMcpServer(name, raw, { binary });
+    this.post({ type: "mcpTestResult", name, started: result.started, reason: result.reason });
   }
 
   /** Takes a queued message back. If it already launched, the host refuses and the message stays in the chat. */

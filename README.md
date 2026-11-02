@@ -23,7 +23,7 @@
 
 **Antares** is an open-source editor interface for Muse Code, for VS Code and VS Code–based editors such as Antigravity. It talks to your locally installed `muse` through its official Muse Server Protocol (MSP), so Muse keeps doing the login, the model calls and the sandboxing. Antares only gives it a friendlier place to live.
 
-> **Status: release candidate 0.1.4.** Chat with streaming, tool cards, approvals with the host's own choices, five permission modes, voice input (Windows), a composer "+" menu (files, folders, skills, connectors, plugins, queue), file-edit diffs with a cumulative Changes view, images from the workspace, and Computer Use approval cards work and were checked in VS Code and Antigravity IDE. Several things could not be verified with a real model, a real browser server, a real OAuth provider or a working sandbox on the test machine; every such limit is listed in the [roadmap](#roadmap) and in the docs.
+> **Status: release candidate 0.2.0.** Chat with streaming, tool cards, approvals with the host's own choices, five permission modes, voice input (Windows), a composer "+" menu (files, folders, skills, connectors, plugins, queue), file-edit diffs with a cumulative Changes view, images from the workspace, Computer Use approval cards, a model catalog that follows your plan, a Standard/Contributor indicator, a **skills manager**, an **MCP manager**, a **plugin and marketplace manager**, web-access switches and a page **Preview** work and were checked in VS Code and Antigravity IDE. Several things could not be verified with a real model, a real browser server, a real OAuth provider or a working sandbox on the test machine; every such limit is listed in the [roadmap](#roadmap) and in the docs.
 
 > **Having trouble?** "sandbox unavailable", shell commands failing: see [docs/SANDBOX.md](docs/SANDBOX.md). Voice setup: [docs/VOICE.md](docs/VOICE.md). Browser and app control: [docs/BROWSER.md](docs/BROWSER.md). What the protocol does and does not allow, as measured: [docs/PROTOCOL-NOTES.md](docs/PROTOCOL-NOTES.md).
 
@@ -56,6 +56,13 @@ Every project of the author is named after a star. Antares (α Scorpii) is the r
 | 3C | **Done as far as the host allows:** images from the workspace are shown. A `read_file` of an image shows the file's thumbnail on its card, and `![alt](path)` in an answer shows the file when it is in the workspace (read by the extension: no URL is ever fetched; PNG, JPEG, GIF and WebP only, up to 5 MB, bytes checked; a refused image says why). **The image a model saw through a tool is not exposed by Muse** (measured), and **model-generated images have no support in the contract** | **Done** |
 | 3D | **First slice done:** tool presentation. `write_todos` is a checklist; `write_file` and `edit_file` show the file, the `+n −m` counts and an inline diff built from Muse's own patch, with **Open diff** (VS Code's diff editor, before and after) and **Open file**. A **Changes (n)** button lists every file changed in the chat once and opens one diff per file from before the first edit to now. **Worktrees could not be built or tested here** (the host's own git probe times out on the test machine) and an **embedded terminal was left out on purpose** (it would re-run what the agent ran, under other permissions) | **Done, with limits** |
 | 4 | **Video input: not built.** The contract is understood (`media/upload` in base64 chunks of `video/mp4` or `video/quicktime`, then a `video` part; needs a durable session; the host validates the total and the type and rejected a synthetic file at finalize), but it could not be tested end to end without a real video and a paid turn, and shipping it blind would be a guess. Packaging is ready (see CHANGELOG); publishing to Open VSX and the Marketplace needs the author's accounts and tokens | **Release candidate** |
+| 5A | **Done:** model catalog and plan. The picker comes from Muse (`model/list`); a failed refresh keeps the last list and says it may be out of date; a **↻ Models** button; a notice when the catalog changes or the remembered model is gone; the list is read again when your plan name changes or the window returns to the front. The host does not return models your account cannot use, so nothing is shown as "locked". |
+| 5B | **Done:** usage mode. A read-only **Standard / Contributor** indicator that says "not confirmed" whenever the saved setting does not prove what is in effect, a privacy explanation, and a confirmed switch **to Standard only** (turning Contributor on is done in Muse itself, which records your acknowledgement). |
+| 5C | **Done:** skills manager ("+" > Manage skills). Scope, origin, **real on / user-invocable-only / off state** (read from `muse skills --json`, written and read back), search and filters, name-clash warnings, install from a folder (validated first) and remove, import with preview. Installing from a Git URL is not offered by Muse. |
+| 5D | **Done:** MCP manager ("+" > Connectors). Lists the servers in Muse's `settings.json` (the host's own list does not show them), add / edit / switch off / remove with confirmation, backup and atomic write, secrets never shown, and a **Test** that makes Muse itself start one server in a clean config. A tool call through a settings-defined server was proven end to end with a real turn. |
+| 5E | **Done:** plugins and catalogs. What each plugin brings and the **review state of its hooks and MCP servers** (never approved automatically; each part has its own Approve/Reject), enable / disable / update / remove, a marketplaces view, **suggested catalogs** (Anthropic's official plugin marketplace and Agent Skills collection, offered once, never added silently) and your own marketplaces. |
+| 5F | **Done:** web and preview. A **Web** indicator and switches for Muse's `web_fetch` and `web_search`; a **Preview** button that opens a local dev server, an address or an HTML file of the folder (served read-only on 127.0.0.1) in the editor's own browser. |
+| 5G | **Blocked by Muse:** Muse Image. There is no image-generation method, event or tool in the protocol; the documented way is a separate API with a key and per-image billing, which Antares does not integrate. See [docs/EVOLUCAO.md](docs/EVOLUCAO.md). |
 
 Details, decisions and open questions: [docs/PLAN.md](docs/PLAN.md) (in Portuguese for now).
 
@@ -76,17 +83,17 @@ Known limits worth stating up front:
 Full guide: **[docs/INSTALL.md](docs/INSTALL.md)** (English) · **[docs/INSTALL.pt-BR.md](docs/INSTALL.pt-BR.md)** (Português).
 
 1. **Have Muse Code installed and logged in** (`muse --version`, then `muse login` once). Open your project folder in VS Code or Antigravity IDE.
-2. **Download `antares-0.1.4.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases).
-3. **Install it:** Extensions view, the `...` menu, *Install from VSIX...* (or `code --install-extension antares-0.1.4.vsix`), then *Developer: Reload Window*.
+2. **Download `antares-0.2.0.vsix`** from the [Releases page](https://github.com/Ald3b4r4n/antares/releases).
+3. **Install it:** Extensions view, the `...` menu, *Install from VSIX...* (or `code --install-extension antares-0.2.0.vsix`), then *Developer: Reload Window*.
 4. **Open it:** click the Antares icon in the activity bar, or `Ctrl+Shift+P`, then *Antares: Open*. If it says "Muse executable not found", set `antares.musePath`.
 5. **Optional voice:** `Ctrl+Shift+P`, then *Antares: Set up local voice* (about 450 MB, asks first, runs on your computer).
 6. **Use it:** pick a mode next to the model (Plan reads only; Accept edits edits files; Bypass runs commands with no sandbox), use `+` to add files, folders, skills and more, and watch the footer for your subscription usage.
 
 If shell commands fail with "sandbox unavailable", read [docs/SANDBOX.md](docs/SANDBOX.md).
 
-### What is still missing in 0.1.4
+### What is still missing in 0.2.0
 
-Video input, worktrees, voice recording outside Windows, an embedded terminal, adding MCP servers from the UI, publishing to Open VSX and the Marketplace, and verification with real services (connector OAuth, plugins with hooks, the Auto-review reviewer, a real browser server). Each has a reason in [docs/INSTALL.md](docs/INSTALL.md#10-what-is-still-missing-in-014) and in the [roadmap](#roadmap).
+Video input, worktrees, voice recording outside Windows, an embedded terminal, **Muse Image** (no protocol support), the agent *controlling* a browser by itself (that needs a browser MCP server you configure), installing skills straight from a Git URL, publishing to Open VSX and the Marketplace, and verification with real services (connector OAuth against a real provider, a third-party plugin, the Auto-review reviewer). Each has a reason in [docs/INSTALL.md](docs/INSTALL.md#10-what-is-still-missing-in-020) and in the [roadmap](#roadmap).
 
 ## Requirements
 

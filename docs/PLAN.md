@@ -1,5 +1,7 @@
 # Antares: plano
 
+> **Atualização de 2026-11-02:** a evolução posterior à 0.1.x (auditoria, modelos e plano, modalidade, skills, MCP, plugins e catálogos, web, pré-visualização, Muse Image) está registrada em [EVOLUCAO.md](EVOLUCAO.md). Este plano continua valendo para as fases anteriores.
+
 Atualizado em 31/10/2026. A fase 1 está pronta e verificada nos editores reais (ver o [README](../README.md) e [PROTOCOL-NOTES.md](PROTOCOL-NOTES.md)). Este documento é o plano das próximas fases.
 
 **Regra do projeto:** só prometemos o que o Muse oferece. Cada item abaixo diz de onde vem (contrato exportado, observado no host real, ou função só do lado da Antares) e o que é **desconhecido**. Um item só entra como pronto depois de ser exercitado no host real e na janela real do editor.

@@ -25,6 +25,7 @@ export interface FakeReport {
   pluginInstalls: Record<string, unknown>[];
   marketplaceAdds: Record<string, unknown>[];
   oauth: { kind: string; data: Record<string, unknown> }[];
+  settingsWrite?: Record<string, unknown>[];
 }
 
 /** Reads the report. A missing file or a half-written last line is "not yet": callers poll. */
@@ -104,6 +105,9 @@ export function readReport(path: string): FakeReport {
         break;
       case "marketplace-add":
         report.marketplaceAdds.push(data as Record<string, unknown>);
+        break;
+      case "settingsWrite":
+        (report.settingsWrite ??= []).push(data as Record<string, unknown>);
         break;
       case "skill-import":
         report.skillImports.push(data as Record<string, unknown>);

@@ -17,6 +17,7 @@ rec("argv", process.argv.slice(2));
 let activeModel = "muse-wonder-1.0";
 let turnActive = false;
 let queuedCount = 0;
+let listCalls = 0;
 const CATALOG = [
   { modelId: "muse-wonder-1.0", displayLabel: "muse-wonder-1.0", providerId: "meta", profileId: "tbh", releaseDate: "2026-10-12", description: null, contextLimit: 1007997, outputLimit: 128000, cost: null, isDefault: true, variants: ["minimal", "low", "high", "max"], reasoningEffortVariants: [], defaultReasoningEffort: "high" },
   { modelId: "muse-spark-1.2", displayLabel: "muse-spark-1.2", providerId: "meta", profileId: "tbh", releaseDate: "2026-08-05", description: null, contextLimit: 1007997, outputLimit: 128000, cost: null, isDefault: false, variants: ["minimal", "high", "xhigh"], reasoningEffortVariants: [{ tier: "xhigh", description: "Use this for deepest analysis and complex fixes." }], defaultReasoningEffort: "high" },
@@ -67,10 +68,43 @@ rl.on("line", (line) => {
       if (msg.params.modelId) activeModel = msg.params.modelId;
       send({ id: msg.id, result: { session: { sessionId: "s1", modelId: activeModel }, viewCursor: "" } });
       break;
-    case "model/list":
-      rec("list", msg.params);
-      send({ id: msg.id, result: { providerId: "meta", profileId: "tbh", source: "providerCatalog", models: CATALOG.map((m) => ({ ...m, isActive: Boolean(msg.params.sessionId) && m.modelId === activeModel })) } });
+    case "settings/read":
+      rec("settingsRead", msg.params);
+      if (process.env.FAKE_MUSE_SETTINGS === "error") {
+        send({ id: msg.id, error: { code: -32601, message: "method not found: settings/read" } });
+        break;
+      }
+      send({ id: msg.id, result: { schemaVersion: 1, values: JSON.parse(process.env.FAKE_MUSE_SETTINGS ?? "{}") } });
       break;
+    case "settings/writeValue":
+      rec("settingsWrite", msg.params);
+      if (process.env.FAKE_MUSE_WRITE === "refuse") {
+        send({ id: msg.id, error: { code: -32602, message: "settings `contributor_mode_enabled` is not writable as given" } });
+        break;
+      }
+      send({ id: msg.id, result: { keyPath: msg.params.keyPath, effectiveValue: process.env.FAKE_MUSE_WRITE === "ignored" ? true : msg.params.value } });
+      break;
+    case "account/read":
+      rec("accountRead", msg.params);
+      send({ id: msg.id, result: { state: "accountLogin", label: "person@example.test", credentialRequired: true } });
+      break;
+    case "model/list": {
+      rec("list", msg.params);
+      // FAKE_MUSE_LIST=fail|empty|drop|add changes the answer from the call number FAKE_MUSE_LIST_AFTER + 1 on (default 1).
+      listCalls += 1;
+      const change = process.env.FAKE_MUSE_LIST;
+      const altered = change && listCalls > Number(process.env.FAKE_MUSE_LIST_AFTER ?? 1);
+      if (altered && change === "fail") {
+        send({ id: msg.id, error: { code: -32603, message: "catalog backend unavailable" } });
+        break;
+      }
+      let rows = CATALOG;
+      if (altered && change === "empty") rows = [];
+      if (altered && change === "drop") rows = CATALOG.filter((m) => m.modelId !== "muse-spark-1.2");
+      if (altered && change === "add") rows = [...CATALOG, { ...CATALOG[0], modelId: "muse-spark-2.0", displayLabel: "muse-spark-2.0", isDefault: false }];
+      send({ id: msg.id, result: { providerId: "meta", profileId: "tbh", source: "providerCatalog", models: rows.map((m) => ({ ...m, isActive: Boolean(msg.params.sessionId) && m.modelId === activeModel })) } });
+      break;
+    }
     case "session/list": {
       rec("list-sessions", msg.params);
       const here = process.env.FAKE_MUSE_WORKSPACE ?? "";

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { MuseHost, MspError } from "./host.ts";
-import { mapApprovalRequest, mapModels, mapNotification, mapUsage, sandboxNote, type ChatEvent, type ModelInfo } from "./events.ts";
+import { catalogSource, diffCatalog, mapApprovalRequest, mapModels, mapNotification, mapUsage, sandboxNote, type ChatEvent, type ModelInfo } from "./events.ts";
 import { canonicalPath, mapPlugins, mapSkillImport, mapSkills, parseSlash, rootsFor, type ImportSource, type PluginRow, type SkillImportView, type SkillRow } from "./composer.ts";
 import { buildInputParts, validateImages, type ImageInput } from "./images.ts";
 import { mapSessionRows, readHistory, type SessionRowView } from "./sessions.ts";
@@ -56,6 +56,8 @@ export class MuseSession extends EventEmitter {
   private currentTurnId?: string;
   private starting?: Promise<void>;
   private catalog: ModelInfo[] = [];
+  private catalogFailed = false;
+  private catalogFetchedAtMs: number | undefined;
   private modelId?: string;
   private effort?: string;
   private skills?: SkillRow[];
@@ -229,11 +231,35 @@ export class MuseSession extends EventEmitter {
     if (!host || !host.running) return this.catalog;
     try {
       const result = await host.request("model/list", this.sessionId ? { sessionId: this.sessionId } : {});
-      this.catalog = mapModels(result);
+      const next = mapModels(result);
+      // An empty answer after a good catalog is not "the subscription has no models": keep what worked and say so.
+      if (next.length === 0 && this.catalog.length > 0) throw new Error("the host returned an empty model list");
+      const changes = diffCatalog(this.catalog, next);
+      this.catalog = next;
+      this.catalogFailed = false;
+      this.catalogFetchedAtMs = Date.now();
       this.emitEvent({ type: "models", models: this.catalog });
-    } catch {
-      /* the picker simply stays as it was */
+      this.emitEvent({ type: "modelsStatus", stale: false, fetchedAtMs: this.catalogFetchedAtMs, source: catalogSource(result) });
+      if (changes.added.length > 0 || changes.removed.length > 0) {
+        const parts = [changes.added.length ? `new: ${changes.added.join(", ")}` : "", changes.removed.length ? `no longer available: ${changes.removed.join(", ")}` : ""].filter(Boolean);
+        this.notice("info", `The model catalog changed (${parts.join("; ")}).`);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.emitEvent({ type: "modelsStatus", stale: true, fetchedAtMs: this.catalogFetchedAtMs, error: reason });
+      if (!this.catalogFailed) this.notice("warning", `Could not refresh the model list (${reason}). The models shown may be out of date.`);
+      this.catalogFailed = true;
     }
+    return this.catalog;
+  }
+
+  /** When the catalog was last read successfully (ms since the epoch), or undefined if never. */
+  lastCatalogReadMs(): number | undefined {
+    return this.catalogFetchedAtMs;
+  }
+
+  /** The last good catalog (what the picker shows). */
+  currentCatalog(): ModelInfo[] {
     return this.catalog;
   }
 

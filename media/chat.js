@@ -668,6 +668,46 @@
     modelSel.disabled = state.running;
     effortSel.disabled = state.running || model.variants.length === 0;
   }
+  // Says when the catalog shown is not the host's current answer (a refresh failed), and when it was last read.
+  const staleEl = $("modelsStale");
+  const refreshModelsBtn = $("refreshModels");
+  function renderModelsStatus() {
+    const s = state.modelsStatus;
+    if (!s || !s.stale) {
+      staleEl.hidden = true;
+      refreshModelsBtn.title = "Ask Muse for the model list again (no model call)" + (s && s.fetchedAtMs ? ". Last read " + new Date(s.fetchedAtMs).toLocaleTimeString() + (s.source ? " (" + s.source + ")" : "") : "");
+      return;
+    }
+    staleEl.hidden = false;
+    staleEl.textContent = "model list may be out of date";
+    staleEl.title = (s.error || "The last refresh failed.") + (s.fetchedAtMs ? " Last good read: " + new Date(s.fetchedAtMs).toLocaleTimeString() + "." : "");
+  }
+  // Standard / Contributor: read-only. The label says "not confirmed" whenever the saved setting is not proof of what is in effect.
+  // Web access: the state of Muse's own web tools, and a way to change it (asks first).
+  // Preview: opens a page in the editor's built-in browser. The button shows when the agent printed a local address.
+  const previewBtn = $("previewBtn");
+  function onPreviewUrls(urls) {
+    previewBtn.dataset.has = urls && urls.length ? "1" : "";
+    previewBtn.textContent = urls && urls.length ? "Preview ●" : "Preview";
+    previewBtn.title = urls && urls.length ? "The agent printed " + urls.at(-1) + ". Click to open it in the editor." : previewBtn.title;
+  }
+  previewBtn.addEventListener("click", () => vscode.postMessage({ type: "previewMenu" }));
+  const webInfo = $("webInfo");
+  function onWeb(m) {
+    webInfo.textContent = m.label;
+    webInfo.dataset.web = m.label === "Web: on" ? "on" : m.label === "Web: off" ? "off" : "partial";
+    webInfo.title = m.detail + " Click to change it.";
+  }
+  webInfo.addEventListener("click", () => vscode.postMessage({ type: "webMenu" }));
+  const modeInfo = $("modeInfo");
+  function onContributor(s) {
+    if (!s) return;
+    modeInfo.textContent = s.label;
+    modeInfo.dataset.mode = s.mode;
+    modeInfo.title = s.detail + " Click for what it means for your data.";
+  }
+  modeInfo.addEventListener("click", () => vscode.postMessage({ type: "showPrivacy" }));
+  refreshModelsBtn.addEventListener("click", () => vscode.postMessage({ type: "refreshModels" }));
   modelSel.addEventListener("change", () => {
     if (modelSel.value) vscode.postMessage({ type: "setModel", modelId: modelSel.value });
   });
@@ -901,6 +941,10 @@
         renderModelControls();
         renderMeta();
         break;
+      case "modelsStatus":
+        state.modelsStatus = e;
+        renderModelsStatus();
+        break;
       case "activity":
         if (e.status === "started") state.background.add(e.itemId);
         else state.background.delete(e.itemId);
@@ -943,6 +987,12 @@
     else if (msg.type === "folders") renderFolders(msg.folders || []);
     else if (msg.type === "skills") onSkills(msg);
     else if (msg.type === "extras") onExtras(msg);
+    else if (msg.type === "skillsManage") onSkillsManage(msg);
+    else if (msg.type === "mcpTestResult") onMcpTest(msg);
+    else if (msg.type === "openExtras") openExtras(msg.kind);
+    else if (msg.type === "web") onWeb(msg);
+    else if (msg.type === "previewUrls") onPreviewUrls(msg.urls);
+    else if (msg.type === "contributor") onContributor(msg.state);
     else if (msg.type === "reset") {
       closeHistory();
       closeExtras();
@@ -1234,6 +1284,7 @@
     } else if (act === "connectors") openExtras("connectors");
     else if (act === "plugins") openExtras("plugins");
     else if (act === "importSkills") vscode.postMessage({ type: "importSkills" });
+    else if (act === "manageSkills") openSkillsPanel();
   });
   document.addEventListener("click", (ev) => {
     if (!plusMenu.hidden && !plusMenu.contains(ev.target) && !plusBtn.contains(ev.target)) closeMenus();
@@ -1395,7 +1446,7 @@
   function openExtras(kind) {
     extrasPanel.hidden = false;
     extrasPanel.dataset.kind = kind;
-    extrasTitle.textContent = kind === "connectors" ? "Connectors (MCP servers)" : "Plugins";
+    extrasTitle.textContent = kind === "connectors" ? "Connectors (MCP servers)" : kind === "marketplaces" ? "Marketplaces" : "Plugins";
     extrasStatus.textContent = "Reading from Muse…";
     extrasList.replaceChildren();
     const actions = $("extrasActions");
@@ -1404,14 +1455,32 @@
       const add = (label, title, message) => {
         const b = el("button", "link tiny", label);
         b.title = title;
-        b.addEventListener("click", () => vscode.postMessage(message));
+        b.addEventListener("click", () => (message.type === "__marketplaces" ? openExtras("marketplaces") : vscode.postMessage(message)));
         actions.append(b);
       };
       add("Install from folder…", "Check a plugin folder with Muse, see what it brings, then install it", { type: "installPlugin", from: "folder" });
       add("Install from marketplace…", "Pick a plugin a configured marketplace offers", { type: "installPlugin", from: "marketplace" });
+      add("Marketplaces…", "See, refresh or remove the catalogs plugins can be installed from", { type: "__marketplaces" });
       add("Add marketplace…", "Add a catalog to install from (installs nothing by itself)", { type: "addMarketplace" });
     }
-    vscode.postMessage({ type: kind === "connectors" ? "listConnectors" : "listPlugins" });
+    if (kind === "marketplaces") {
+      const b1 = el("button", "link tiny", "Add marketplace…");
+      b1.addEventListener("click", () => vscode.postMessage({ type: "addMarketplace" }));
+      const b2 = el("button", "link tiny", "← Plugins");
+      b2.addEventListener("click", () => openExtras("plugins"));
+      actions.append(b1, b2);
+    }
+    if (kind === "connectors") {
+      const addBtn = (label, title, message) => {
+        const b = el("button", "link tiny", label);
+        b.title = title;
+        b.addEventListener("click", () => vscode.postMessage(message));
+        actions.append(b);
+      };
+      addBtn("Add local server…", "A program Muse starts on this computer (stdio)", { type: "mcpAdd", kind: "stdio" });
+      addBtn("Add HTTP server…", "A server Muse connects to over HTTP", { type: "mcpAdd", kind: "http" });
+    }
+    vscode.postMessage({ type: kind === "connectors" ? "listConnectors" : kind === "marketplaces" ? "listMarketplaces" : "listPlugins" });
   }
   function closeExtras() {
     extrasPanel.hidden = true;
@@ -1435,28 +1504,123 @@
       return;
     }
     const rows = msg.rows || [];
-    const noun = msg.kind === "connectors" ? "connector" : "plugin";
+    const noun = msg.kind === "connectors" ? "connector" : msg.kind === "marketplaces" ? "marketplace" : "plugin";
+    if (msg.kind === "connectors") state.mcpFile = msg.file;
+    if (msg.kind === "marketplaces") state.suggestedCatalogs = msg.suggested || [];
     const how = msg.kind === "connectors"
-      ? "Sign in and out here; Muse runs the sign-in and keeps the credential. Adding or removing a connector is done in Muse's own configuration."
-      : "Installing runs nothing by itself, but a plugin can bring hooks and servers that do: you see what it brings first.";
+      ? "Servers defined in Muse's settings can be added, changed, switched off and removed here (a backup is kept). Test checks that Muse can start one; whether a tool call works is only shown in a chat."
+      : msg.kind === "marketplaces"
+        ? "A marketplace is a catalog of plugins. Refreshing one downloads its list again; nothing is installed."
+        : msg.rich
+          ? "Skills of an enabled plugin are active. Its hooks and MCP servers run code on this computer and wait for your approval; a plugin you update must be approved again for anything that changed. Changes apply to new chats."
+          : "Installing runs nothing by itself, but a plugin can bring hooks and servers that do: you see what it brings first.";
     extrasStatus.textContent = rows.length
       ? rows.length + " " + noun + (rows.length === 1 ? "" : "s") + ". " + how
       : "No " + noun + "s are set up in Muse. " + how;
+    if (msg.kind === "connectors" && msg.file) {
+      const notes = [msg.file.parseError, ...(msg.file.warnings || [])].filter(Boolean);
+      if (notes.length) extrasStatus.textContent += " " + notes.join(" ");
+    }
+    if (msg.kind === "marketplaces" && (msg.suggested || []).length) {
+      const head = el("li", "session extra-row suggested-head");
+      head.append(el("div", "session-title", "Suggested to start with"), el("div", "session-meta", "Nothing here is added until you choose. You can add your own with Add marketplace…"));
+      extrasList.append(head);
+      for (const s of msg.suggested) {
+        const li = el("li", "session extra-row suggested");
+        const info = el("div", "session-info");
+        info.append(el("div", "session-title", s.title), el("div", "session-meta skill-desc", s.note), el("div", "session-meta", (s.kind === "plugins" ? "plugin marketplace" : "skills collection") + " · " + s.source));
+        const badges = el("div", "extra-badges");
+        const b = el("button", "link tiny", s.kind === "plugins" ? "Add catalog…" : "Browse skills…");
+        b.title = s.kind === "plugins" ? "Add this marketplace to Muse (asks first; installs nothing)" : "Download the collection, pick skills and install them (asks first)";
+        b.addEventListener("click", () => vscode.postMessage({ type: s.kind === "plugins" ? "addSuggested" : "browseCollection", name: s.name }));
+        badges.append(b);
+        li.append(info, badges);
+        extrasList.append(li);
+      }
+    }
     for (const r of rows) {
       const li = el("li", "session extra-row");
       const info = el("div", "session-info");
-      info.append(el("div", "session-title", msg.kind === "connectors" ? r.name : r.id));
+      info.append(el("div", "session-title", msg.kind === "connectors" || msg.kind === "marketplaces" ? r.name : r.id));
       const badges = el("div", "extra-badges");
       if (msg.kind === "connectors") {
-        info.append(el("div", "session-meta", "from " + r.source));
-        badges.append(el("span", "badge", r.transport), el("span", "badge", r.oauth === "loggedIn" ? "signed in" : r.oauth === "loggedOut" ? "signed out" : "no sign-in"));
-        // Only servers the host can resolve by name (settings or a plugin) can be signed in or out.
-        if (r.source !== "session" && (r.oauth === "loggedOut" || r.oauth === "loggedIn")) {
+        info.append(el("div", "session-meta", "from " + r.source + (r.mode ? " · if it cannot start: " + r.mode : "") + (r.target ? " · " + r.target : "")));
+        if (r.envKeys && r.envKeys.length) info.append(el("div", "session-meta", "environment: " + r.envKeys.join(", ") + " (values hidden)"));
+        if (r.headerKeys && r.headerKeys.length) info.append(el("div", "session-meta", "headers: " + r.headerKeys.join(", ") + " (values hidden)"));
+        for (const p of r.problems || []) info.append(el("div", "session-meta skill-warn", p));
+        const stateLine = el("div", "session-meta mcp-test");
+        stateLine.dataset.name = r.name;
+        const known = (state.mcpTests || {})[r.name];
+        stateLine.textContent = known ? (known.running ? "Testing…" : known.started ? "Muse started it and it answered (clean config)." : "Did not start: " + known.reason) : "";
+        if (known && known.started === false) stateLine.classList.add("skill-warn");
+        info.append(stateLine);
+        badges.append(el("span", "badge", r.transport), el("span", "badge", r.enabled ? "enabled" : "disabled"), el("span", "badge", r.oauth === "loggedIn" ? "signed in" : r.oauth === "loggedOut" ? "signed out" : r.oauth === "unknown" ? "sign-in not reported" : "no sign-in"));
+        // Sign in and out go through the host. When the host does not report the server (it does not for ones defined in settings), sign-in is offered for HTTP ones and its result is shown as it comes.
+        if (r.source !== "session" && r.enabled && (r.oauth === "loggedOut" || r.oauth === "loggedIn" || (r.oauth === "unknown" && r.transport === "streamable_http"))) {
           const out = r.oauth === "loggedIn";
           const b = el("button", "link tiny", out ? "Sign out" : "Sign in");
           b.addEventListener("click", () => vscode.postMessage({ type: out ? "connectorSignOut" : "connectorSignIn", server: r.name }));
           badges.append(b);
         }
+        if (r.editable) {
+          const act = (label, title, message) => {
+            const b = el("button", "link tiny", label);
+            b.title = title;
+            b.addEventListener("click", () => vscode.postMessage(message));
+            badges.append(b);
+          };
+          act("Test", "Ask Muse to start this server in a clean configuration (no model call)", { type: "mcpTest", name: r.name });
+          act("Edit", "Change the command or URL and the start mode (secrets are kept)", { type: "mcpEdit", name: r.name });
+          act(r.enabled ? "Disable" : "Enable", "Switch it off or on in Muse's settings", { type: "mcpToggle", name: r.name, enabled: !r.enabled });
+          act("Remove", "Delete it from Muse's settings (a backup is kept)", { type: "mcpRemove", name: r.name });
+        }
+      } else if (msg.kind === "marketplaces") {
+        info.append(el("div", "session-meta", r.kind + (r.source ? " · " + r.source : "") + " · " + r.pluginCount + " plugin" + (r.pluginCount === 1 ? "" : "s")));
+        const refresh = el("button", "link tiny", "Refresh");
+        refresh.title = "Download this catalog's list again (installs nothing)";
+        refresh.addEventListener("click", () => vscode.postMessage({ type: "marketplaceUpdate", name: r.name }));
+        const remove = el("button", "link tiny", "Remove");
+        remove.addEventListener("click", () => vscode.postMessage({ type: "marketplaceRemove", name: r.name }));
+        badges.append(refresh, remove);
+      } else if (msg.rich) {
+        // What Muse's own CLI says: what the plugin brings and where each code-running part stands.
+        info.querySelector(".session-title").textContent = r.name + (r.name !== r.id ? " (" + r.id + ")" : "");
+        info.append(el("div", "session-meta", "version " + (r.version || "unknown") + " · " + r.provenance + (r.description ? " · " + r.description : "")));
+        const brings = [];
+        if (r.skills.length) brings.push(r.skills.length + " skill" + (r.skills.length === 1 ? "" : "s") + " (active while the plugin is enabled)");
+        if (r.commands) brings.push(r.commands + " command" + (r.commands === 1 ? "" : "s"));
+        if (!r.enabled) brings.push("disabled: its hooks and MCP servers are not loaded");
+        if (brings.length) info.append(el("div", "session-meta", "Brings: " + brings.join(", ")));
+        const STATUS = { review_needed: "waiting for your review", trusted_enabled: "approved, runs", trusted_disabled: "rejected, does not run", unknown: "state not reported" };
+        for (const part of r.runtime) {
+          const line = el("div", "session-meta plugin-part");
+          const label = (part.kind === "hook" ? "Hook" : part.kind === "mcp_server" ? "MCP server" : part.kind) + " · " + (part.detail || part.capabilityId) + " · ";
+          line.append(document.createTextNode(label));
+          const st = el("span", part.status === "review_needed" ? "skill-warn" : "", STATUS[part.status] || part.status);
+          line.append(st);
+          if ((part.kind === "hook" || part.kind === "mcp_server") && part.status !== "trusted_enabled") {
+            const a = el("button", "link tiny", "Approve…");
+            a.addEventListener("click", () => vscode.postMessage({ type: "pluginDecide", pluginId: r.id, kind: part.kind, capabilityId: part.capabilityId, decision: "approve" }));
+            line.append(a);
+          }
+          if ((part.kind === "hook" || part.kind === "mcp_server") && part.status !== "trusted_disabled") {
+            const j = el("button", "link tiny", "Reject");
+            j.addEventListener("click", () => vscode.postMessage({ type: "pluginDecide", pluginId: r.id, kind: part.kind, capabilityId: part.capabilityId, decision: "reject" }));
+            line.append(j);
+          }
+          info.append(line);
+        }
+        badges.append(el("span", "badge", r.enabled ? "enabled" : "disabled"), el("span", "badge", r.active ? "loaded" : "not loaded"));
+        if (r.needsReview) badges.append(el("span", "badge skill-warn", r.needsReview + " to review"));
+        const act = (label, title, message) => {
+          const b = el("button", "link tiny", label);
+          b.title = title;
+          b.addEventListener("click", () => vscode.postMessage(message));
+          badges.append(b);
+        };
+        act(r.enabled ? "Disable" : "Enable", "Switch the plugin off or on for new chats", { type: "pluginEnable", id: r.id, enabled: !r.enabled });
+        act("Update", "Copy it again from where it was installed from", { type: "pluginUpdate", id: r.id });
+        act("Remove", "Uninstall the plugin", { type: "pluginRemove", id: r.id });
       } else {
         info.append(el("div", "session-meta", "version " + (r.version || "unknown") + " · " + r.source));
         badges.append(el("span", "badge", r.enabled ? "enabled" : "disabled"));
@@ -1466,6 +1630,112 @@
     }
   }
   $("extrasClose").addEventListener("click", closeExtras);
+  // A server test is under way or finished: the row's state line says so, and the result is kept until the list is read again.
+  function onMcpTest(msg) {
+    (state.mcpTests ||= {})[msg.name] = msg;
+    for (const line of extrasList.querySelectorAll(".mcp-test")) {
+      if (line.dataset.name !== msg.name) continue;
+      line.textContent = msg.running ? "Testing…" : msg.started ? "Muse started it and it answered (clean config)." : "Did not start: " + msg.reason;
+      line.classList.toggle("skill-warn", msg.started === false);
+    }
+  }
+
+  // ---- skills manager: what Muse knows, where each skill lives, whether it is on, and how to change that ----
+  const skillsPanel = $("skillsPanel");
+  const skillsList = $("skillsList");
+  const skillsStatus = $("skillsStatus");
+  const skillsSearch = $("skillsSearch");
+  const skillsFilter = $("skillsFilter");
+  const ACTIVATION_LABEL = { on: "on", userInvocableOnly: "you can run it, the model cannot", off: "off", unknown: "unknown" };
+  function openSkillsPanel() {
+    closeExtras();
+    skillsPanel.hidden = false;
+    skillsStatus.textContent = "Reading from Muse…";
+    skillsList.replaceChildren();
+    vscode.postMessage({ type: "manageSkills" });
+    skillsSearch.focus();
+  }
+  function onSkillsManage(msg) {
+    state.managedSkills = msg.rows || [];
+    state.skillConflicts = new Set(msg.conflicts || []);
+    state.skillsManageError = msg.error;
+    renderSkillsPanel();
+  }
+  function renderSkillsPanel() {
+    if (skillsPanel.hidden) return;
+    skillsList.replaceChildren();
+    if (state.skillsManageError) {
+      skillsStatus.textContent = "Could not read the skills: " + state.skillsManageError;
+      return;
+    }
+    const q = skillsSearch.value.trim().toLowerCase();
+    const filter = skillsFilter.value;
+    const all = state.managedSkills || [];
+    const rows = all.filter((s) => {
+      if (filter === "attention" ? !(s.activation !== "on" || s.diagnostics.length) : filter !== "all" && s.scope !== filter) return false;
+      return !q || (s.name + " " + s.displayName + " " + s.description + " " + s.origin + " " + s.scope).toLowerCase().includes(q);
+    });
+    const dupes = state.skillConflicts && state.skillConflicts.size ? " " + state.skillConflicts.size + " name" + (state.skillConflicts.size === 1 ? " is" : "s are") + " offered by more than one skill." : "";
+    skillsStatus.textContent = rows.length + " of " + all.length + " skills." + dupes + " Project skills load only once the folder is trusted. A change applies to new chats.";
+    for (const s of rows) {
+      const li = el("li", "session extra-row skill-row");
+      const info = el("div", "session-info");
+      info.append(el("div", "session-title", s.displayName));
+      if (s.description) info.append(el("div", "session-meta skill-desc", s.description));
+      const meta = [s.scope + " · " + s.origin];
+      if (s.startupTokens) meta.push("~" + s.startupTokens + " tokens at the start of each chat");
+      if (s.path) meta.push(s.path);
+      info.append(el("div", "session-meta", meta.join(" · ")));
+      if (state.skillConflicts && state.skillConflicts.has(s.name)) {
+        const where = (state.managedSkills || []).filter((o) => o.name === s.name).map((o) => o.scope).join(", ");
+        info.append(el("div", "session-meta skill-warn", "Another skill has the name /" + s.name + " (" + where + "). Which one runs depends on Muse's precedence: check before relying on it."));
+      }
+      for (const d of s.diagnostics) info.append(el("div", "session-meta skill-warn", d));
+      const badges = el("div", "extra-badges");
+      const use = el("button", "link tiny", "Use");
+      use.title = "Put /" + s.name + " in the message box";
+      use.disabled = s.activation === "off";
+      use.addEventListener("click", () => {
+        skillsPanel.hidden = true;
+        input.value = "/" + s.name + " ";
+        input.focus();
+        updateSlash();
+      });
+      const sel = el("select", "skill-activation");
+      sel.setAttribute("aria-label", "Activation of " + s.displayName);
+      for (const key of ["on", "userInvocableOnly", "off"]) {
+        const o = el("option", "", ACTIVATION_LABEL[key]);
+        o.value = key;
+        sel.append(o);
+      }
+      if (s.activation === "unknown") {
+        const o = el("option", "", "unknown (Muse did not say)");
+        o.value = "unknown";
+        o.disabled = true;
+        sel.prepend(o);
+      }
+      sel.value = s.activation;
+      sel.addEventListener("change", () => {
+        sel.disabled = true;
+        vscode.postMessage({ type: "setSkillActivation", id: s.id, scope: s.scope, activation: sel.value });
+      });
+      badges.append(use, sel);
+      // Only a skill installed for the user (in Muse's own skills folder) can be removed here.
+      if (s.scope === "user" && s.path && s.path.startsWith("$CONFIG_DIR/skills/")) {
+        const rm = el("button", "link tiny", "Remove");
+        rm.addEventListener("click", () => vscode.postMessage({ type: "uninstallSkill", id: s.id }));
+        badges.append(rm);
+      }
+      li.append(info, badges);
+      skillsList.append(li);
+    }
+  }
+  skillsSearch.addEventListener("input", renderSkillsPanel);
+  skillsFilter.addEventListener("change", renderSkillsPanel);
+  $("skillsClose").addEventListener("click", () => { skillsPanel.hidden = true; });
+  $("skillsRefresh").addEventListener("click", () => { skillsStatus.textContent = "Reading from Muse…"; vscode.postMessage({ type: "manageSkills" }); });
+  $("skillsImport").addEventListener("click", () => vscode.postMessage({ type: "importSkills" }));
+  $("skillsInstall").addEventListener("click", () => vscode.postMessage({ type: "installSkillFolder" }));
 
   // ---- image attachments: paste, drop, or the attach button ----
   const approxBytes = (b64) => Math.floor((b64.length * 3) / 4) - (b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0);
