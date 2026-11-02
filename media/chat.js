@@ -1283,6 +1283,7 @@
       updateSlash();
     } else if (act === "connectors") openExtras("connectors");
     else if (act === "plugins") openExtras("plugins");
+    else if (act === "marketplaces") openExtras("marketplaces");
     else if (act === "importSkills") vscode.postMessage({ type: "importSkills" });
     else if (act === "manageSkills") openSkillsPanel();
   });

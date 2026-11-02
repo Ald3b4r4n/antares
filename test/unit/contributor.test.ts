@@ -2,7 +2,7 @@
 // The shapes are the real ones observed from muse 1.4.14 (`settings/read` values, `account/read`).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeContributor, mapContributor, readContributor, switchToStandard } from "../../src/muse/contributor.ts";
+import { describeContributor, mapContributor, readContributor, switchToContributor, switchToStandard } from "../../src/muse/contributor.ts";
 
 const fake = new URL("../fixtures/fake-muse.mjs", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -80,6 +80,18 @@ test("switchToStandard writes exactly contributor_mode_enabled=false and checks 
   const { outcome, writes } = await writeWith({});
   assert.deepEqual(outcome, { ok: true, r: { saved: false } });
   assert.deepEqual(writes, [{ keyPath: "contributor_mode_enabled", value: false }]);
+});
+
+test("switchToContributor writes exactly contributor_mode_enabled=true and checks the host's answer", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "antares-contrib-"));
+  const reportPath = join(dir, "report.json");
+  try {
+    const r = await switchToContributor({ binary: process.execPath, binaryArgs: [fake], cwd: dir, env: { ...process.env, FAKE_MUSE_REPORT: reportPath } });
+    assert.deepEqual(r, { saved: true });
+    assert.deepEqual(readReport(reportPath).settingsWrite, [{ keyPath: "contributor_mode_enabled", value: true }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("switchToStandard fails loudly when the host refuses", async () => {

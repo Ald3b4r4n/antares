@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- **Modo de uso:** o botão Standard/Contributor agora também permite mudar para Contributor (antes só havia o caminho para Standard), sempre com uma confirmação que explica o uso dos dados; o valor é relido do Muse depois de gravar.
+- **Marketplaces:** novo item **Marketplaces** no menu "+" (antes só se chegava por Plugins > Marketplaces…).
+
 ## 0.2.0
 
 Evolução em fases depois da auditoria de 2026-11-02 (detalhes e evidências em `docs/EVOLUCAO.md`):

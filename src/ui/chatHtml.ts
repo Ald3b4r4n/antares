@@ -107,6 +107,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <button role="menuitem" data-act="slash" class="menu-item"><span>Slash commands</span><kbd>/</kbd></button>
     <button role="menuitem" data-act="connectors" class="menu-item"><span>Connectors</span></button>
     <button role="menuitem" data-act="plugins" class="menu-item"><span>Plugins</span></button>
+    <button role="menuitem" data-act="marketplaces" class="menu-item"><span>Marketplaces</span></button>
     <button role="menuitem" data-act="manageSkills" class="menu-item"><span>Manage skills…</span></button>
     <button role="menuitem" data-act="importSkills" class="menu-item"><span>Import skills…</span></button>
   </div>

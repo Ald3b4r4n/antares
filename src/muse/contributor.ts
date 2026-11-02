@@ -82,6 +82,15 @@ export function describeContributor(read: ContributorRead, env: NodeJS.ProcessEn
  * Muse's documentation says a change applies from the next request; that has not been verified for an open session.
  */
 export async function switchToStandard(options: ContributorReadOptions): Promise<{ saved: boolean }> {
+  return switchContributor(options, false);
+}
+
+/** Turns Contributor on after an explicit confirmation in the UI; the host's answer must be Contributor, or this throws. */
+export async function switchToContributor(options: ContributorReadOptions): Promise<{ saved: boolean }> {
+  return switchContributor(options, true);
+}
+
+async function switchContributor(options: ContributorReadOptions, value: boolean): Promise<{ saved: boolean }> {
   const host = new MuseHost({ binary: options.binary, args: [...(options.binaryArgs ?? []), "serve", "--disable-shell", "--disable-write"], cwd: options.cwd, env: options.env ?? process.env });
   try {
     host.start();
@@ -90,9 +99,9 @@ export async function switchToStandard(options: ContributorReadOptions): Promise
       capabilities: { experimentalApi: true, requestedCapabilities: [], userInputDialogs: false },
     });
     host.notify("initialized");
-    const result = await host.request<{ effectiveValue?: unknown }>("settings/writeValue", { keyPath: "contributor_mode_enabled", value: false }, 20_000);
-    if (result.effectiveValue !== false) throw new Error("Muse answered, but the saved mode is still not Standard.");
-    return { saved: false };
+    const result = await host.request<{ effectiveValue?: unknown }>("settings/writeValue", { keyPath: "contributor_mode_enabled", value }, 20_000);
+    if (result.effectiveValue !== value) throw new Error(`Muse answered, but the saved mode is still not ${value ? "Contributor" : "Standard"}.`);
+    return { saved: value };
   } finally {
     await host.stop(3000);
   }

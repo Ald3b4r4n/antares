@@ -862,7 +862,7 @@ try {
     // The menu.
     await evalWeb("(() => { d.getElementById('plus').click(); return true; })()");
     const menu = await evalWeb("({ open: !d.getElementById('plusMenu').hidden, expanded: d.getElementById('plus').getAttribute('aria-expanded'), items: [...d.querySelectorAll('#plusMenu .menu-item')].map(b => b.querySelector('span').textContent) })");
-    check("the + button opens a menu with files, folder, slash commands, connectors, plugins, skills management and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Add current file", "Add selection", "Slash commands", "Connectors", "Plugins", "Manage skills…", "Import skills…"]), JSON.stringify(menu));
+    check("the + button opens a menu with files, folder, slash commands, connectors, plugins, skills management and import skills", menu.open && menu.expanded === "true" && JSON.stringify(menu.items) === JSON.stringify(["Add files or photos", "Add folder", "Add current file", "Add selection", "Slash commands", "Connectors", "Plugins", "Marketplaces", "Manage skills…", "Import skills…"]), JSON.stringify(menu));
     await shot("15-plus-menu");
 
     // Files and photos: a text file inside the workspace becomes @path, a name with a space is quoted, a photo

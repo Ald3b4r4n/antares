@@ -18,7 +18,7 @@ import { describeWeb, readWebSettings, setFetchEnabled, setSearchMode, type Sear
 import { PlanWatch, shouldRefreshCatalog } from "../muse/planWatch.ts";
 import { addMarketplace as addMarketplaceCli, decideCapability, listManagedPlugins, listMarketplaces, removeMarketplace, removePlugin, setPluginEnabled, updateMarketplace, updatePlugin, type CapabilityKind } from "../muse/pluginsCli.ts";
 import { findConflicts, installSkill, listManagedSkills, setSkillActivation, uninstallSkill, validateSkill, type CliOptions } from "../muse/skillsCli.ts";
-import { describeContributor, readContributor, switchToStandard, type ContributorState } from "../muse/contributor.ts";
+import { describeContributor, readContributor, switchToContributor, switchToStandard, type ContributorState } from "../muse/contributor.ts";
 import { httpsOrigin, oauthSignIn, oauthSignOut } from "../muse/mcpLogin.ts";
 import { describeCapabilities, listAvailablePlugins, validatePlugin } from "../muse/pluginCli.ts";
 import { locateMuse } from "../muse/locate.ts";
@@ -660,11 +660,37 @@ export class ChatPanel {
     if (!this.contributor) await this.refreshContributor();
     const s = this.contributor;
     if (!s) return;
-    const lines = [s.account ? `Account: ${s.account}` : "", `${s.label}. ${s.detail}`, s.privacy, "Antares can switch Muse to Standard (after one more confirmation). Turning Contributor on is done in Muse itself: run it and open /settings, then the Contributor mode row, where Muse shows you its data-use disclosure."].filter(Boolean);
+    const lines = [s.account ? `Account: ${s.account}` : "", `${s.label}. ${s.detail}`, s.privacy, "Either switch asks for one more confirmation before anything is saved."].filter(Boolean);
     const toStandard = "Switch to Standard…";
-    const choice = await vscode.window.showInformationMessage(`Muse usage mode: ${s.label}`, { modal: true, detail: lines.join(BLANK_LINE) }, ...(s.mode === "standard" ? [] : [toStandard]), "Read the terms");
+    const toContributor = "Switch to Contributor…";
+    const choice = await vscode.window.showInformationMessage(`Muse usage mode: ${s.label}`, { modal: true, detail: lines.join(BLANK_LINE) }, ...(s.mode === "standard" ? [] : [toStandard]), ...(s.mode === "contributor" ? [] : [toContributor]), "Read the terms");
     if (choice === "Read the terms") void vscode.env.openExternal(vscode.Uri.parse("https://dev.meta.ai/docs/muse-code/subscriptions"));
     else if (choice === toStandard) await this.confirmStandard();
+    else if (choice === toContributor) await this.confirmContributor();
+  }
+
+  /** Turning Contributor on lets Meta train on the user's content, so it asks first and says so plainly. */
+  private async confirmContributor(): Promise<void> {
+    const confirm = "Switch to Contributor";
+    const answer = await vscode.window.showWarningMessage(
+      "Switch Muse to Contributor mode?",
+      { modal: true, detail: ["Contributor mode lets Meta use your content (prompts, code and files Muse reads) to train future Meta models, in exchange for more usage from your plan.", "This changes the setting saved on this computer in Muse's own settings, so it applies to every Muse client here.", "If Muse has never shown you its data-use disclosure, accept it in Muse itself (/settings, Contributor mode); Antares cannot record that acknowledgement for you."].join(BLANK_LINE) },
+      confirm,
+    );
+    if (answer !== confirm) return;
+    const binary = locateMuse(vscode.workspace.getConfiguration("antares").get<string>("musePath"));
+    const root = this.workspaceFolder();
+    if (!binary || !root) {
+      this.notice("error", "Could not switch the mode: " + (!binary ? "the Muse executable was not found." : "open a folder first."));
+      return;
+    }
+    try {
+      await switchToContributor({ binary, cwd: root, clientVersion: (this.context.extension.packageJSON as { version?: string }).version });
+      this.notice("info", "Muse is now saved as Contributor mode. It applies from your next request.");
+    } catch (error) {
+      this.notice("error", `Could not switch the mode: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await this.refreshContributor();
   }
 
   /** The only switch Antares offers is toward Standard, after an explicit confirmation. Turning Contributor on happens in Muse. */
