@@ -2,7 +2,7 @@
   "name": "antares",
   "displayName": "Antares",
   "description": "Open-source editor interface for the Muse Code agent, built on the official Muse Server Protocol (MSP).",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "ald3b4r4n",
   "author": { "name": "Antonio Rafael Souza Cruz de Noronha", "url": "https://www.antoniorafael.com.br/" },
   "license": "MIT",

@@ -47,7 +47,9 @@ pre.logo { font-family: var(--mono); color: var(--antares); margin: 0; line-heig
 .body { line-height: 1.55; overflow-wrap: anywhere; }
 .body p { margin: 0 0 .7em; white-space: pre-wrap; }
 .body p:last-child { margin-bottom: 0; }
-.msg.user .body { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; white-space: pre-wrap; }
+.msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user .msg-head { gap: 8px; }
+.msg.user .body { max-width: 88%; background: color-mix(in srgb, var(--antares) 14%, var(--card)); border: 1px solid color-mix(in srgb, var(--antares) 38%, var(--border)); border-radius: 14px; padding: 8px 14px; white-space: pre-wrap; }
 .msg.streaming .body::after { content: "▍"; color: var(--antares); animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 code { font-family: var(--mono); background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }
@@ -67,7 +69,7 @@ code { font-family: var(--mono); background: var(--code-bg); padding: 1px 4px; b
 .code pre code { background: none; padding: 0; font-size: var(--vscode-editor-font-size, 12px); }
 
 .notice { margin: 0 0 14px; padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--card); border-radius: 0 6px 6px 0; white-space: pre-wrap; }
-.notice.error { border-left-color: var(--error); }
+.notice.error { border-left-color: var(--error); background: none; color: var(--error); }
 .notice.info { border-left-color: var(--muted); }
 
 footer { border-top: 1px solid var(--border); padding: 8px 14px 10px; }
@@ -89,10 +91,30 @@ textarea:focus { outline: none; border-color: var(--focus); }
 
 /* ---- tool calls ---- */
 .badge { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; border: 1px solid var(--border); border-radius: 999px; padding: 1px 7px; color: var(--muted); white-space: nowrap; }
-.tool { margin: 0 0 12px; border: 1px solid var(--border); border-left: 3px solid var(--muted); border-radius: 6px; background: var(--card); padding: 6px 10px; }
-.tool.running { border-left-color: var(--warn); }
-.tool.done { border-left-color: #3fb950; }
-.tool.failed { border-left-color: var(--error); }
+/* The agent's steps (reasoning and tool calls) hang on one vertical rail, a dot per step: hollow for thinking, filled and
+   coloured by state for tools. No card around a step; its output and diffs sit under it. */
+.step { position: relative; margin: 0; padding: 5px 0 5px 28px; --dot: #3fb950; }
+.step::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+.step::after { content: ""; position: absolute; left: 2px; top: 11px; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; background: var(--dot); border: 2px solid var(--dot); }
+:not(.step) + .step::before { top: 17px; }
+.step:has(+ :not(.step)):not(:last-child)::before, .step:last-child::before { bottom: calc(100% - 17px); }
+.step:has(+ :not(.step)) { margin-bottom: 12px; }
+.step:last-child { margin-bottom: 12px; }
+.tool.running { --dot: var(--warn); }
+.tool.running::after { animation: blink 1s steps(2) infinite; }
+.tool.failed { --dot: var(--error); }
+.tool.done .badge { display: none; }
+.think { --dot: var(--muted); }
+.think::after { background: var(--bg); }
+.think.live::after { animation: blink 1s steps(2) infinite; }
+.think-details > summary { cursor: pointer; color: var(--muted); list-style: none; }
+.think-details > summary::-webkit-details-marker { display: none; }
+.think-details > summary::before { content: "\25B8 "; }
+.think-details[open] > summary::before { content: "\25BE "; }
+.think-details.empty > summary { cursor: default; }
+.think-details.empty > summary::before { content: ""; }
+.think-text { margin-top: 4px; padding-left: 10px; border-left: 2px solid var(--border); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.think-details.empty .think-text { display: none; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tool-name { font-family: var(--mono); font-weight: 600; }
 .tool-summary { font-family: var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }

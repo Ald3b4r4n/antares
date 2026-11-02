@@ -133,6 +133,9 @@ export type ChatEvent =
   | { type: "ledger"; todayTokens: number; weekTokens: number }
   | { type: "effortChanged"; effort: string; source: string }
   | { type: "activity"; itemId: string; kind: string; label?: string; status: string }
+  /** A reasoning item: `parts` are the summary parts the host has (empty when it only says the model is thinking). */
+  | { type: "reasoning"; itemId: string; parts: string[]; status: "started" | "completed" }
+  | { type: "reasoningDelta"; itemId: string; part: number; delta: string }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
   | { type: "session"; sessionId?: string; profileId?: string; sandbox?: string; version?: string; durability?: string }
   | { type: "history"; source: "resume" | "fork"; mode: string; events: ChatEvent[]; note?: string }
@@ -230,6 +233,10 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
           : { type: "assistantCompleted", itemId, text: str(item.text) ?? "" };
       }
       if (kind === "toolCall") return mapToolCall(item, itemId);
+      if (kind === "reasoning") {
+        const parts = Array.isArray(item.summary) ? item.summary.filter((p): p is string => typeof p === "string") : [];
+        return { type: "reasoning", itemId, parts, status: started ? "started" : "completed" };
+      }
       if (ACTIVITY_KINDS.has(kind)) {
         return { type: "activity", itemId, kind, label: str(item.label), status: started ? "started" : "completed" };
       }
@@ -244,6 +251,8 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
     case "item/delta": {
       const itemId = str(params.itemId);
       const delta = str(params.delta);
+      const part = /^summary\.(\d+)$/.exec(str(params.field) ?? "");
+      if (part && itemId && delta !== undefined) return { type: "reasoningDelta", itemId, part: Number(part[1]), delta };
       if (str(params.field) !== "text" || !itemId || delta === undefined) return undefined;
       return { type: "assistantDelta", itemId, delta };
     }

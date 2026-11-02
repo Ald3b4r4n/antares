@@ -18,6 +18,14 @@ const base = {
   subject: { kind: "shell", command: "ls -la", stages: ["ls -la"], workspaceRoot: "C:\\w" },
 };
 
+// Shape from the exported schema (ItemKind "reasoning": `summary` is one string per part, streamed as item/delta field "summary.n").
+test("reasoning items and their summary deltas become reasoning events", () => {
+  assert.deepEqual(mapNotification("item/started", { item: { itemId: "r1", kind: "reasoning" } }), { type: "reasoning", itemId: "r1", parts: [], status: "started" });
+  assert.deepEqual(mapNotification("item/delta", { itemId: "r1", field: "summary.1", delta: "so " }), { type: "reasoningDelta", itemId: "r1", part: 1, delta: "so " });
+  assert.deepEqual(mapNotification("item/completed", { item: { itemId: "r1", kind: "reasoning", summary: ["a", "b"] } }), { type: "reasoning", itemId: "r1", parts: ["a", "b"], status: "completed" });
+  assert.equal(mapNotification("item/delta", { itemId: "r1", field: "output", delta: "x" }), undefined);
+});
+
 test("tool call (observed shape): started, held for a hook", () => {
   const e = mapNotification("item/started", { item: { itemId: "i1", kind: "toolCall", tool: "powershell", callId: "c", args: '{"command":"echo antares","description":"Echo antares"}', held: true, heldFor: "hook", status: "inProgress" } });
   assert.deepEqual(e, { type: "toolCall", itemId: "i1", tool: "powershell", summary: "echo antares", status: "inProgress", held: true, heldFor: "hook", failure: undefined, hint: undefined, output: undefined });

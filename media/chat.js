@@ -42,6 +42,7 @@
     running: false,
     items: new Map(), // itemId -> { el, text, role, raf }
     tools: new Map(), // itemId -> element
+    reasoning: new Map(), // itemId -> { node, details, body, parts }
     toolEvents: new Map(), // itemId -> the last toolCall event, so a patch that arrives later can redraw the card
     patches: new Map(), // itemId -> the host's patch for a file edit, as read by the extension
     images: new Map(), // workspace path -> { ok, dataUrl | reason }: images the extension read for the chat
@@ -349,15 +350,34 @@
     return b;
   }
 
+  // The model's reasoning: one collapsed "Thinking" step on the timeline; opening it shows the summary the host sends, when it sends one.
+  function upsertReasoning(itemId, update) {
+    let r = state.reasoning.get(itemId);
+    if (!r) {
+      const node = el("div", "step think");
+      const details = el("details", "think-details");
+      const summary = el("summary", "think-label", "Thinking");
+      const body = el("div", "think-text");
+      details.append(summary, body);
+      node.append(details);
+      r = { node, details, body, parts: [] };
+      state.reasoning.set(itemId, r);
+      append(node);
+    }
+    update(r);
+    const text = r.parts.filter(Boolean).join("\n\n");
+    r.body.textContent = text;
+    r.details.classList.toggle("empty", text === "");
+  }
   function upsertTool(e) {
     state.toolEvents.set(e.itemId, e);
     let node = state.tools.get(e.itemId);
     if (!node) {
-      node = el("div", "tool");
+      node = el("div", "tool step");
       state.tools.set(e.itemId, node);
       append(node);
     }
-    node.className = "tool " + (e.failure ? "failed" : e.status === "completed" ? "done" : "running");
+    node.className = "tool step " + (e.failure ? "failed" : e.status === "completed" ? "done" : "running");
     node.replaceChildren();
     const head = el("div", "tool-head");
     const patch = state.patches.get(e.itemId);
@@ -881,6 +901,17 @@
       case "toolCall":
         upsertTool(e);
         break;
+      case "reasoning":
+        upsertReasoning(e.itemId, (r) => {
+          if (e.parts.length) r.parts = e.parts.slice();
+          r.node.classList.toggle("live", e.status === "started");
+        });
+        break;
+      case "reasoningDelta":
+        upsertReasoning(e.itemId, (r) => {
+          r.parts[e.part] = (r.parts[e.part] || "") + e.delta;
+        });
+        break;
       case "approvalRequested":
         addApproval(e);
         break;
@@ -1011,12 +1042,13 @@
       state.skills = undefined;
       state.skillsError = undefined;
       state.skillsAsked = false;
-      for (const node of messages.querySelectorAll(".msg, .notice, .tool, .approval")) node.remove();
+      for (const node of messages.querySelectorAll(".msg, .notice, .tool, .think, .approval")) node.remove();
       state.items.clear();
       state.attachments = [];
       state.sentQueue.length = 0;
       renderAttachments();
       state.tools.clear();
+      state.reasoning.clear();
       state.approvals.clear();
       state.tokens = state.context = undefined;
       state.sandbox = state.sandboxNote = undefined; // the next host reports it again

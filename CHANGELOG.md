@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- **Interface do chat no estilo do Capella:** passos do agente (pensamento e ferramentas) numa linha do tempo vertical, sem cartões, com bolinha por passo; balão do usuário à direita; erros em texto vermelho simples.
+- **Thinking:** o item de raciocínio do Muse aparece como um passo recolhível.
+
 ## 0.2.1
 
 - **Modo de uso:** o botão Standard/Contributor agora também permite mudar para Contributor (antes só havia o caminho para Standard), sempre com uma confirmação que explica o uso dos dados; o valor é relido do Muse depois de gravar.
