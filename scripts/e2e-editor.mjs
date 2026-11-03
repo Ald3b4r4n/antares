@@ -1049,7 +1049,7 @@ try {
       await evalWeb("(() => { d.getElementById('plus').click(); d.querySelector('#plusMenu [data-act=connectors]').click(); return true; })()");
       await waitFor("the connectors from the file", () => evalWeb("d.querySelectorAll('#extrasList li').length === 2"), 30000);
       const listed = await evalWeb("({ names: [...d.querySelectorAll('#extrasList .session-title')].map(n => n.textContent), text: d.getElementById('extrasPanel').textContent, adds: [...d.querySelectorAll('#extrasActions button')].map(b => b.textContent) })");
-      check("the connectors list shows the servers defined in settings.json, with env names and no secret values", listed.names.join() === "mini,gone" && /MINI_SECRET/.test(listed.text) && !/e2e-secret-value-123/.test(listed.text) && listed.adds.join() === "Add local server…,Add HTTP server…", JSON.stringify({ names: listed.names, adds: listed.adds }));
+      check("the connectors list shows the servers defined in settings.json, with env names and no secret values", listed.names.join() === "mini,gone" && /MINI_SECRET/.test(listed.text) && !/e2e-secret-value-123/.test(listed.text) && listed.adds.join() === "Add local server…,Add HTTP server…,Add the browser…", JSON.stringify({ names: listed.names, adds: listed.adds }));
       await shot("22-connectors-file");
       const rowButton = (name, label) => "(() => { const li = [...d.querySelectorAll('#extrasList li')].find(x => x.querySelector('.session-title').textContent === " + JSON.stringify(name) + "); const b = [...li.querySelectorAll('button')].find(x => x.textContent === " + JSON.stringify(label) + "); b.click(); return true; })()";
       await evalWeb(rowButton("mini", "Test"));

@@ -91,6 +91,7 @@ export function chatHtml(options: ChatHtmlOptions): string {
     <button id="changesBtn" class="link tiny" hidden title="Every file changed in this chat, with one diff per file from before the first edit">Changes</button>
     <button id="refreshUsage" class="link tiny" title="Read fresh subscription usage from Muse (no model call; at most one read per minute)">↻ Usage</button>
   </div>
+  <details id="tasks" class="tasks" hidden><summary id="tasksSummary"></summary><div id="tasksList"></div></details>
   <ul id="pending" class="pending" aria-label="Queued messages" hidden></ul>
   <div id="folders" class="folders" aria-label="Folders added to this chat" hidden></div>
   <div id="modeMenu" class="menu mode-menu" role="menu" aria-label="Permission mode" hidden></div>

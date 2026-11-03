@@ -26,6 +26,16 @@ test("reasoning items and their summary deltas become reasoning events", () => {
   assert.equal(mapNotification("item/delta", { itemId: "r1", field: "output", delta: "x" }), undefined);
 });
 
+// Shape from the exported schema: session/todoListChanged replaces the whole list; an empty list clears it.
+test("the task list is mapped whole, and an empty list is a cleared one", () => {
+  assert.deepEqual(
+    mapNotification("session/todoListChanged", { sessionId: "s", revision: 2, items: [{ text: "a", status: "completed" }, { text: "b", status: "inProgress", activeForm: "Doing b" }, { nope: 1 }] }),
+    { type: "todos", items: [{ text: "a", status: "completed", activeForm: undefined }, { text: "b", status: "inProgress", activeForm: "Doing b" }] },
+  );
+  assert.deepEqual(mapNotification("session/todoListChanged", { items: [] }), { type: "todos", items: [] });
+  assert.equal(mapNotification("session/todoListChanged", {}), undefined);
+});
+
 test("tool call (observed shape): started, held for a hook", () => {
   const e = mapNotification("item/started", { item: { itemId: "i1", kind: "toolCall", tool: "powershell", callId: "c", args: '{"command":"echo antares","description":"Echo antares"}', held: true, heldFor: "hook", status: "inProgress" } });
   assert.deepEqual(e, { type: "toolCall", itemId: "i1", tool: "powershell", summary: "echo antares", status: "inProgress", held: true, heldFor: "hook", failure: undefined, hint: undefined, output: undefined });

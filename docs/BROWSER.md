@@ -1,6 +1,14 @@
 # Browser and app control
 
-Antares **does not configure or run a browser for you**. Muse Code controls a browser through an MCP server that *you* set up in Muse. Antares then shows what the agent is doing and asks you before each consequential action. This page says what is known, what is not, and how to stay safe.
+Muse Code controls a browser through an MCP server. Antares can **add one for you** ("+" > Connectors > **Add the browser…**: Microsoft's Playwright MCP, with a question that says it is third-party code) and then shows what the agent is doing and asks you before each consequential action. It never runs a browser itself. This page says what is known, what is not, and how to stay safe.
+
+## The "Add the browser" button
+
+- It installs `@playwright/mcp` **0.0.83** (pinned, npm's install scripts off, about 19 MB) into the extension's own storage, using the Node.js and npm already on your PATH (npm runs through `node`, never a shell), and writes the server into Muse's `settings.json` with the usual confirmation and backup, in `optional` mode.
+- It drives the **Edge or Chrome you already have** (nothing is downloaded), headless, in a throwaway profile: no cookies, no logins, nothing kept. You choose **only this computer** (the browser is asked to load only `localhost` / `127.0.0.1` pages) or **any website**. The page filter is not a security boundary: a page can redirect.
+- Muse starts an MCP server with only the environment written in its entry, so the entry carries the command's absolute path and a short list of system variables (TEMP, LOCALAPPDATA and the like; no secrets, no PATH), with the values they have when you add it. If you move your user folders, add the server again.
+- Under the stricter permission modes each browser action asks first, like any MCP tool.
+- Checked on this computer (Windows, Edge, Muse 1.4.14): the pinned package installs; with only that environment the server opens a local page headless and reads its title, and an outside address is refused (`only this computer`); Muse itself starts the entry (the Test button's route), and refuses a broken one. **Not checked:** a model driving the browser in a chat, Chrome, macOS or Linux, and screenshots shown in the chat (they are saved in the extension's `browser-output` folder; the chat does not show them).
 
 ## What Antares does
 
@@ -11,7 +19,7 @@ Antares **does not configure or run a browser for you**. Muse Code controls a br
 
 ## What Antares cannot do
 
-- **Control a browser by itself.** Antares can *add the MCP server for you* ("+" > Connectors > Add local server, with a confirmation, a backup and a Test), but it does not choose, install or run a browser server, and the agent clicking and typing is the MCP server's doing. The **Preview** button only opens a page for *you* in the editor's browser.
+- **Control a browser by itself.** Antares adds the browser server (above) and shows and gates what the agent does with it; the clicking and typing is the MCP server's doing. The **Preview** button only opens a page for *you* in the editor's browser.
 - Run Computer Use setup. Muse describes that flow for macOS; what Windows offers is unknown.
 - See into a plugin or MCP server before it runs.
 
@@ -49,4 +57,4 @@ Controlling a browser is the highest-impact thing an agent can do, because it ca
 
 ## Verified
 
-Unit tests cover the wording rules, masked secrets, non-ASCII hosts and hostile text, and the tool-argument lines. A synthetic Computer Use approval was rendered in VS Code and Antigravity IDE under the real content-security policy (markup in a window title stayed text). **No real browser MCP server and no real Computer Use request was run.**
+Unit tests cover the wording rules, masked secrets, non-ASCII hosts and hostile text, and the tool-argument lines. A synthetic Computer Use approval was rendered in VS Code and Antigravity IDE under the real content-security policy (markup in a window title stayed text). The Playwright MCP server was installed and driven for real (see "The Add the browser button" above). **No real Computer Use request was run, and no model has yet driven the browser in a chat.**

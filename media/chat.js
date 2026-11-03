@@ -425,6 +425,20 @@
     }
   }
 
+  // The agent's task list, kept above the message box: "Tasks 1/3 · the item in progress", open for the whole list.
+  function renderTasks(items) {
+    const box = $("tasks");
+    if (!items || items.length === 0) {
+      box.hidden = true;
+      $("tasksList").replaceChildren();
+      return;
+    }
+    const done = items.filter((t) => t.status === "completed").length;
+    const current = items.find((t) => t.status === "inProgress") || items.find((t) => t.status !== "completed");
+    $("tasksSummary").textContent = "Tasks " + done + "/" + items.length + (current ? " · " + (current.activeForm || current.text) : " · all done");
+    $("tasksList").replaceChildren(todoList(items));
+    box.hidden = false;
+  }
   // A checklist the agent keeps (write_todos): done, in progress, to do.
   function todoList(items) {
     const list = el("ul", "todos");
@@ -990,10 +1004,22 @@
         state.modelsStatus = e;
         renderModelsStatus();
         break;
-      case "activity":
+      case "activity": {
         if (e.status === "started") state.background.add(e.itemId);
         else state.background.delete(e.itemId);
         renderMeta();
+        // Before the first words arrive Muse may be running hooks or checking reminders: say so instead of "Thinking…".
+        const phase = e.kind === "hookRun" ? "Running a hook…" : e.kind === "reminderChild" ? "Checking reminders…" : undefined;
+        if (phase && state.running) {
+          const idle = state.statusText === "Sending…" || state.statusText === "Thinking…";
+          const ours = state.statusText === "Running a hook…" || state.statusText === "Checking reminders…";
+          if (e.status === "started" && (idle || ours)) setRunning(true, phase);
+          else if (e.status !== "started" && ours && state.background.size === 0) setRunning(true, "Thinking…");
+        }
+        break;
+      }
+      case "todos":
+        renderTasks(e.items);
         break;
       case "history":
         // A stored conversation is redrawn without touching the running/ready state.
@@ -1063,6 +1089,7 @@
       state.sentQueue.length = 0;
       state.echoes.length = 0;
       state.prewarmed = false;
+      renderTasks([]);
       renderAttachments();
       state.tools.clear();
       state.reasoning.clear();
@@ -1554,6 +1581,7 @@
       };
       addBtn("Add local server…", "A program Muse starts on this computer (stdio)", { type: "mcpAdd", kind: "stdio" });
       addBtn("Add HTTP server…", "A server Muse connects to over HTTP", { type: "mcpAdd", kind: "http" });
+      addBtn("Add the browser…", "Let the agent open pages, click and take screenshots (Playwright MCP, third-party code; asks first)", { type: "mcpAddBrowser" });
     }
     vscode.postMessage({ type: kind === "connectors" ? "listConnectors" : kind === "marketplaces" ? "listMarketplaces" : "listPlugins" });
   }

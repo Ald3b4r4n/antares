@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { browserArgs, browserChannel, browserEnv, findNode, findNpmCli, installBrowserServer, installedCli, LOCAL_ORIGINS, PLAYWRIGHT_MCP_VERSION, type BrowserScope } from "../muse/browserPreset.ts";
 import * as vscode from "vscode";
 import { PROFILES, type ChatEvent } from "../muse/events.ts";
 import { cycleMode, DEFAULT_MODE, modeById, modeOfProfile, modeRows } from "../muse/modes.ts";
@@ -73,6 +75,7 @@ type FromWebview =
   | { type: "marketplaceUpdate"; name: string }
   | { type: "marketplaceRemove"; name: string }
   | { type: "mcpAdd"; kind: string }
+  | { type: "mcpAddBrowser" }
   | { type: "mcpEdit"; name: string }
   | { type: "mcpRemove"; name: string }
   | { type: "mcpToggle"; name: string; enabled: boolean }
@@ -392,6 +395,9 @@ export class ChatPanel {
         break;
       case "mcpAdd":
         await this.mcpAdd(message.kind === "http" ? "streamable_http" : "stdio");
+        break;
+      case "mcpAddBrowser":
+        await this.mcpAddBrowser();
         break;
       case "mcpEdit":
         await this.mcpEdit(message.name);
@@ -1866,6 +1872,84 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
       input.transport === "streamable_http" && input.headers ? `Headers: ${Object.keys(input.headers).join(", ")} (values hidden).` : "",
     ].filter(Boolean);
     if (await this.confirmAndSave(`Add the MCP server "${name}"?`, detail, (text) => applyEdit(text, { op: "upsert", input }))) await this.listConnectors();
+  }
+
+  /**
+   * "Add the browser": Microsoft's Playwright MCP server, so that the agent can open a page, click and take a screenshot.
+   * Third-party code from npm: said plainly, installed at a pinned version with install scripts off into this extension's own
+   * storage, and added to Muse's settings like any server (with the same confirmation and backup). Nothing runs until Muse
+   * starts it in a chat, and each of its tools is asked about under the stricter permission modes.
+   */
+  private async mcpAddBrowser(): Promise<void> {
+    const file = await this.readMcpFile();
+    const taken = new Set(file.config.entries.map((e) => e.name));
+    const name = ["browser", "playwright", "browser2"].find((n) => !taken.has(n));
+    if (!name) {
+      this.notice("error", "There are servers called browser, playwright and browser2 already.");
+      return;
+    }
+    const channel = browserChannel(process.platform, existsSync);
+    if (!channel) {
+      this.notice("error", "No Microsoft Edge or Google Chrome was found: the browser server drives an installed browser and does not download one.");
+      return;
+    }
+    const node = findNode();
+    const npmCli = node ? findNpmCli(node) : undefined;
+    if (!node || !npmCli) {
+      this.notice("error", "Node.js with npm was not found on this computer's PATH. Install Node.js, then try again.");
+      return;
+    }
+    const scope = await vscode.window.showQuickPick(
+      [
+        { label: "Only this computer", description: "localhost, 127.0.0.1", detail: "To look at the page you are building. The browser is asked to load only pages served from this computer.", scope: "local" as BrowserScope },
+        { label: "Any website", description: "", detail: "The agent can open any address, for research or to test something online.", scope: "web" as BrowserScope },
+      ],
+      { title: "Add the browser: which pages may it open?", placeHolder: "You can change this later by editing the server's arguments.", ignoreFocusOut: true },
+    );
+    if (!scope) return;
+    const browserLabel = channel === "msedge" ? "Microsoft Edge" : "Google Chrome";
+    const dir = join(this.context.globalStorageUri.fsPath, "playwright-mcp");
+    const outDir = join(this.context.globalStorageUri.fsPath, "browser-output");
+    const detail = [
+      `Antares will install @playwright/mcp ${PLAYWRIGHT_MCP_VERSION} (Microsoft's Playwright, Apache-2.0, about 19 MB) from npm into this extension's own storage, with npm's install scripts turned off, and add it to Muse's settings as the MCP server "${name}". This is third-party code that runs on your computer, with your permissions, and MCP tools are not sandboxed.`,
+      `It drives your installed ${browserLabel} (nothing is downloaded), headless, in a throwaway profile: no cookies, no logins, nothing kept.`,
+      scope.scope === "local" ? `Pages: only this computer (${LOCAL_ORIGINS.split(";").join(", ")}). That is a filter on the browser's requests, not a security boundary: a page can redirect.` : "Pages: any website. A web page can try to mislead the agent: read what it is about to do.",
+      "Muse starts a server with only the environment written in its entry, so the entry carries a few system variables (paths such as TEMP and LOCALAPPDATA, never secrets).",
+      "Under the stricter permission modes every action of the browser asks first, like any MCP tool.",
+    ].join(BLANK_LINE);
+    const go = "Install and add";
+    if ((await vscode.window.showWarningMessage("Add the browser (Playwright)?", { modal: true, detail }, go)) !== go) return;
+    let cli: string;
+    try {
+      await mkdir(dir, { recursive: true });
+      const read = (p: string) => {
+        try {
+          return readFileSync(p, "utf8");
+        } catch {
+          return undefined;
+        }
+      };
+      const found = installedCli(dir, read);
+      cli = found.cli;
+      if (!found.ok) {
+        const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Installing @playwright/mcp ${PLAYWRIGHT_MCP_VERSION}…` }, () => installBrowserServer(dir, node, npmCli));
+        if (!result.ok || !installedCli(dir, read).ok) {
+          this.notice("error", `The browser server could not be installed (is npm available and online?). npm said: ${result.output.trim().slice(-300) || "nothing"}`);
+          return;
+        }
+      }
+      await mkdir(outDir, { recursive: true });
+    } catch (error) {
+      this.notice("error", `The browser server could not be prepared: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    const input: McpServerInput = { name, transport: "stdio", command: node, args: browserArgs(cli, channel, scope.scope, outDir), env: browserEnv(), mode: "optional" };
+    const problems = validateInput(input);
+    if (problems.length) {
+      this.notice("error", problems.join(" "));
+      return;
+    }
+    if (await this.confirmAndSave(`Add the MCP server "${name}"?`, [`The browser server (Playwright MCP ${PLAYWRIGHT_MCP_VERSION}) will be added, started by ${basename(node)}, mode optional: if it cannot start, Muse skips it with a warning.`, `Browser: ${browserLabel}. ${scope.scope === "local" ? "Only this computer." : "Any website."}`], (text) => applyEdit(text, { op: "upsert", input }))) await this.listConnectors();
   }
 
   private async mcpEdit(name: unknown): Promise<void> {

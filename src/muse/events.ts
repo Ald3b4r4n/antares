@@ -136,6 +136,8 @@ export type ChatEvent =
   /** A reasoning item: `parts` are the summary parts the host has (empty when it only says the model is thinking). */
   | { type: "reasoning"; itemId: string; parts: string[]; status: "started" | "completed" }
   | { type: "reasoningDelta"; itemId: string; part: number; delta: string }
+  /** The agent's whole task list, replacing the previous one (an empty list clears it). */
+  | { type: "todos"; items: { text: string; status: string; activeForm?: string }[] }
   | { type: "notice"; level: "info" | "warning" | "error"; text: string }
   | { type: "session"; sessionId?: string; profileId?: string; sandbox?: string; version?: string; durability?: string }
   | { type: "history"; source: "resume" | "fork"; mode: string; events: ChatEvent[]; note?: string }
@@ -259,6 +261,11 @@ export function mapNotification(method: string, params: unknown): ChatEvent | un
     case "session/modelChanged": {
       const modelId = str(params.modelId);
       return modelId ? { type: "modelChanged", modelId, providerId: str(params.providerId), source: str(params.source) ?? "unknown" } : undefined;
+    }
+    case "session/todoListChanged": {
+      if (!Array.isArray(params.items)) return undefined;
+      const items = params.items.flatMap((row) => (isObj(row) && typeof row.text === "string" ? [{ text: row.text, status: str(row.status) ?? "pending", activeForm: str(row.activeForm) }] : []));
+      return { type: "todos", items };
     }
     case "session/reasoningEffortChanged": {
       const effort = str(params.reasoningEffort);

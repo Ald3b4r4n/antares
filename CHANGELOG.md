@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5
+
+- **Navegador para o agente:** em Connectors, **Add the browser…** instala o Playwright MCP (@playwright/mcp 0.0.83, versão fixada, scripts do npm desligados) no armazenamento da extensão e o adiciona ao settings.json do Muse, com a confirmação e o backup de sempre, em modo optional. Usa o Edge ou Chrome já instalado, headless, em perfil descartável; você escolhe só este computador ou qualquer site. É código de terceiros do npm, e a pergunta diz isso. Detalhes e limites em docs/BROWSER.md.
+
+## 0.2.4
+
+- **Lista de tarefas fixa:** o plano do agente (todo) aparece acima da caixa como 'Tasks 1/3 · item atual', aberto mostra a lista inteira; vem de session/todoListChanged e some quando a lista é limpa.
+- **Caixa de mensagem mais visível:** rodapé numa superfície um nível acima da página, bordas tiradas da cor do texto (valem em tema escuro e claro), campo com sombra e brilho no foco, botões com contorno e tom.
+- **Estado mais claro na espera:** 'Running a hook…' e 'Checking reminders…' no lugar de 'Thinking…' quando o Muse está nisso antes das primeiras palavras.
+
 ## 0.2.3
 
 - **Resposta mais rápida de enviar:** sua mensagem aparece na hora e o chat mostra 'Sending…' (antes esperava o Muse devolvê-la); a sessão do Muse passa a ser iniciada quando você começa a digitar, e não só no envio. Se o envio falhar, a mensagem volta para a caixa.
