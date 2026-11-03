@@ -350,6 +350,8 @@ export class MuseSession extends EventEmitter {
     const input = buildInputParts(text, checked.images, skill);
     if (input.length === 0) throw new Error("There is nothing to send.");
     const roots = this.rootsDirty ? { workspaceRoots: rootsFor(this.options.workspaceRoot, this.extraRoots).map(canonicalPath) } : {};
+    // A steer launches no turn, so it cannot carry new folders (the host refuses it): hold the message until the turn ends instead.
+    if (this.rootsDirty && options.ifBusy === "steer") options = { ...options, ifBusy: "queue" };
     const result = await this.host.request<{ turnId?: unknown; disposition?: unknown }>("turn/start", {
       commandId: uuidv7(),
       sessionId: this.sessionId,

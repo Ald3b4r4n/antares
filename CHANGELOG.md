@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- **Resposta mais rápida de enviar:** sua mensagem aparece na hora e o chat mostra 'Sending…' (antes esperava o Muse devolvê-la); a sessão do Muse passa a ser iniciada quando você começa a digitar, e não só no envio. Se o envio falhar, a mensagem volta para a caixa.
+- **Pasta adicionada com turno em andamento:** a mensagem 'steer' que levaria pastas novas agora fica na fila, porque o Muse recusa essa combinação.
+
 ## 0.2.2
 
 - **Interface do chat no estilo do Capella:** passos do agente (pensamento e ferramentas) numa linha do tempo vertical, sem cartões, com bolinha por passo; balão do usuário à direita; erros em texto vermelho simples.

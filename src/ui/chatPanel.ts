@@ -61,6 +61,7 @@ type FromWebview =
   | { type: "setModel"; modelId: string }
   | { type: "setEffort"; effort?: string }
   | { type: "refreshModels" }
+  | { type: "prewarm" }
   | { type: "manageSkills" }
   | { type: "pluginDecide"; pluginId: string; kind: string; capabilityId: string; decision: string }
   | { type: "pluginEnable"; id: string; enabled: boolean }
@@ -261,6 +262,10 @@ export class ChatPanel {
         break;
       case "send":
         await this.send(message.text, message.images, message.mode === "steer" || message.mode === "queue" ? message.mode : undefined);
+        break;
+      case "prewarm":
+        // The first typing of a chat: bring the session up now so the first send skips that wait. No model call.
+        void this.ensureSession(true)?.start().catch(() => undefined);
         break;
       case "pickFiles":
         await this.pickFiles();
@@ -879,14 +884,22 @@ ${resumable ? "Muse is restarted and this conversation continues under the new m
     const checked = validateImages(images);
     if (!checked.ok) {
       this.notice("error", checked.error);
+      this.post({ type: "sendFailed" });
       return;
     }
-    if (typeof text !== "string" || (text.trim() === "" && checked.images.length === 0)) return;
+    if (typeof text !== "string" || (text.trim() === "" && checked.images.length === 0)) {
+      this.post({ type: "sendFailed" });
+      return;
+    }
     const session = this.ensureSession();
-    if (!session) return;
+    if (!session) {
+      this.post({ type: "sendFailed" });
+      return;
+    }
     try {
       await session.send(text, checked.images, mode ? { ifBusy: mode } : {});
     } catch (error) {
+      this.post({ type: "sendFailed" });
       const reason = error instanceof Error ? error.message : String(error);
       const tooBig = /exceeds the inbound limit|-32002/.test(reason);
       this.notice("error", tooBig

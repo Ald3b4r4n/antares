@@ -43,6 +43,9 @@
     items: new Map(), // itemId -> { el, text, role, raf }
     tools: new Map(), // itemId -> element
     reasoning: new Map(), // itemId -> { node, details, body, parts }
+    echoes: [], // messages shown the moment they were sent, until the host echoes them: { id, text }
+    echoSeq: 0,
+    prewarmed: false, // the extension was asked to start the session when typing began
     toolEvents: new Map(), // itemId -> the last toolCall event, so a patch that arrives later can redraw the card
     patches: new Map(), // itemId -> the host's patch for a file edit, as read by the extension
     images: new Map(), // workspace path -> { ok, dataUrl | reason }: images the extension read for the chat
@@ -873,6 +876,16 @@
         renderMeta();
         break;
       case "userMessage": {
+        // The message this page already drew when it was sent: adopt it (the host's text adds the image markers).
+        const echo = state.echoes.shift();
+        const shown = echo && state.items.get(echo.id);
+        if (shown) {
+          state.items.delete(echo.id);
+          state.items.set(e.itemId, shown);
+          shown.text = e.text || shown.text;
+          paint(shown);
+          break;
+        }
         // Count images by the "[Image #n]" markers as well: an ephemeral host sends the markers but an empty
         // attachments list.
         const count = Math.max((e.text.match(/\[Image #\d+\]/g) || []).length, (e.attachments || []).filter((a) => a.type === "image").length);
@@ -925,6 +938,7 @@
         const secs = e.durationMs ? (e.durationMs / 1000).toFixed(1) + " s" : "";
         const ttft = e.timeToFirstTokenMs ? " · first token " + (e.timeToFirstTokenMs / 1000).toFixed(1) + " s" : "";
         state.turnNote = secs ? "last turn " + secs + ttft : "";
+        state.echoes.length = 0; // a host that never echoed the message leaves the drawn one as the record
         if (e.terminal !== "completed") {
           let text = (e.errorMessage || e.reason || "The turn ended: " + e.terminal) + "";
           if (e.errorKind === "authRequired") text += "\nLog in with the official Muse client (run `muse` and use /login), then try again.";
@@ -1024,6 +1038,7 @@
     else if (msg.type === "web") onWeb(msg);
     else if (msg.type === "previewUrls") onPreviewUrls(msg.urls);
     else if (msg.type === "contributor") onContributor(msg.state);
+    else if (msg.type === "sendFailed") revertEchoes();
     else if (msg.type === "reset") {
       closeHistory();
       closeExtras();
@@ -1046,6 +1061,8 @@
       state.items.clear();
       state.attachments = [];
       state.sentQueue.length = 0;
+      state.echoes.length = 0;
+      state.prewarmed = false;
       renderAttachments();
       state.tools.clear();
       state.reasoning.clear();
@@ -1242,6 +1259,22 @@
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 220) + "px";
   }
+  // The extension could not send: take back the message drawn at once and give its text and images back to the box.
+  function revertEchoes() {
+    if (state.echoes.length === 0) return;
+    for (const x of state.echoes.splice(0)) {
+      const item = state.items.get(x.id);
+      if (item) item.el.remove();
+      state.items.delete(x.id);
+      if (input.value === "") input.value = x.text;
+    }
+    autosize();
+    if (state.attachments.length === 0 && state.lastSent) {
+      state.attachments = state.lastSent;
+      renderAttachments();
+    }
+    setRunning(false, "Ready");
+  }
   // `mode` only matters while a turn runs: "steer" folds the message into it, "queue" holds it.
   function send(mode) {
     const text = input.value.trim();
@@ -1250,9 +1283,18 @@
     closeMenus();
     input.value = "";
     autosize();
+    // Sent to an idle chat: show the message and the working state now, instead of waiting for the host to echo it
+    // (it only does so after the session is up and the turn is accepted). A running turn keeps the host's own flow.
+    const echo = !state.running;
     if (images.length) {
       state.lastSent = images;
-      state.sentQueue.push(images.map((a) => ({ dataUrl: a.dataUrl, width: a.width, height: a.height })));
+      if (!echo) state.sentQueue.push(images.map((a) => ({ dataUrl: a.dataUrl, width: a.width, height: a.height })));
+    }
+    if (echo) {
+      const id = "local-" + ++state.echoSeq;
+      addMessage(id, "user", text, false, images.map((a) => ({ dataUrl: a.dataUrl, width: a.width, height: a.height })));
+      state.echoes.push({ id, text });
+      setRunning(true, "Sending…");
     }
     state.attachments = [];
     renderAttachments();
@@ -1911,6 +1953,11 @@
     else void addFiles([...ev.dataTransfer.files]);
   });
   input.addEventListener("input", () => {
+    // The first typing of a chat starts Muse's session in the background, so the first send does not pay for it.
+    if (!state.prewarmed && input.value.trim() !== "") {
+      state.prewarmed = true;
+      vscode.postMessage({ type: "prewarm" });
+    }
     autosize();
     state.slash.index = 0;
     updateSlash();

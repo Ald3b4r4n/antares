@@ -204,6 +204,21 @@ test("session: a message sent while a turn runs is steered or queued, and the ho
   }
 });
 
+test("session: a steer that would carry new folders is held (queued) instead, because the host refuses it", async () => {
+  const t = run();
+  try {
+    await t.session.send("go");
+    await until(() => t.report().turnStarts.length === 1, "turn/start");
+    t.session.setExtraRoots(["/added/one"]);
+    await t.session.send("more", [], { ifBusy: "steer" });
+    await until(() => t.report().turnStarts.length === 2, "second turn/start");
+    assert.equal(t.report().turnStarts[1]?.ifBusy, "queue");
+    assert.ok(t.report().turnStarts[1]?.workspaceRoots, "the folders still ride along");
+  } finally {
+    await t.done();
+  }
+});
+
 test("session: added folders are sent as the whole sticky root set, once, with the chat's own folder first", async () => {
   const t = run();
   try {
